@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
 use ssb_legacy_msg_data::json::{from_slice, to_vec, DecodeJsonError, EncodeJsonError};
 use ssb_legacy_msg_data::value::Value;
@@ -40,13 +40,16 @@ pub enum Error {
     #[snafu(display("Unable to get the value from the message, the message was invalid"))]
     InvalidMessageNoValue,
     #[snafu(display("Could not serialize message.value to bytes. Failed with: {}", source))]
-    InvalidMessageCouldNotSerializeValue{source: EncodeJsonError},
+    InvalidMessageCouldNotSerializeValue { source: EncodeJsonError },
     #[snafu(display("The actual hash of the value did not match the hash claimed by `key`"))]
     ActualHashDidNotMatchKey,
     #[snafu(display("Previous was set to null but it should have had a value"))]
     PreviousWasNull,
-    #[snafu(display("This feed is forked. Last known good message was as seq: {}", previous_seq))] 
-    ForkedFeed{previous_seq: u64},
+    #[snafu(display(
+        "This feed is forked. Last known good message was as seq: {}",
+        previous_seq
+    ))]
+    ForkedFeed { previous_seq: u64 },
 }
 
 type Result<T, E = Error> = std::result::Result<T, E>;
@@ -65,7 +68,7 @@ struct SsbMessage {
     value: SsbMessageValue,
 }
 
-/// Check that a message is a valid relative to it's previous message. 
+/// Check that a message is a valid relative to it's previous message.
 ///
 /// This checks that:
 /// - the sequence starts at one if it's the first message
@@ -76,7 +79,8 @@ struct SsbMessage {
 /// - the _actual_ hash matches the hash claimed in `key`
 ///
 /// This does not check:
-/// - the signature. See ssb-verify-signatures which lets you to batch verification of signatures. 
+/// - the signature. See ssb-verify-signatures which lets you to batch verification of signatures.
+///
 pub fn validate_hash_chain(message_bytes: &[u8], previous_msg_bytes: Option<&[u8]>) -> Result<()> {
     // msg seq is 1 larger than previous
     let previous_message = match previous_msg_bytes {
@@ -114,10 +118,14 @@ pub fn validate_hash_chain(message_bytes: &[u8], previous_msg_bytes: Option<&[u8
                 expected: expected_sequence
             }
         );
-        
+
         // msg previous must match hash of previous.value otherwise it's a fork.
-        ensure!(message.value.previous.context(PreviousWasNull)? == previous.key, ForkedFeed{previous_seq: previous.value.sequence});
-        
+        ensure!(
+            message.value.previous.context(PreviousWasNull)? == previous.key,
+            ForkedFeed {
+                previous_seq: previous.value.sequence
+            }
+        );
     } else {
         //This message is the first message.
 
@@ -137,8 +145,9 @@ pub fn validate_hash_chain(message_bytes: &[u8], previous_msg_bytes: Option<&[u8
         );
     }
 
-    
-    let verifiable_msg: Value = from_slice(message_bytes).context(InvalidMessage{message: message_bytes.to_owned()})?;
+    let verifiable_msg: Value = from_slice(message_bytes).context(InvalidMessage {
+        message: message_bytes.to_owned(),
+    })?;
 
     // Get the value from the message as this is what was hashed
     let verifiable_msg_value = match verifiable_msg {
@@ -147,7 +156,8 @@ pub fn validate_hash_chain(message_bytes: &[u8], previous_msg_bytes: Option<&[u8
     };
 
     // Get the "value" from the message as bytes that we can hash.
-    let value_bytes = to_vec(verifiable_msg_value, false).context(InvalidMessageCouldNotSerializeValue)?;
+    let value_bytes =
+        to_vec(verifiable_msg_value, false).context(InvalidMessageCouldNotSerializeValue)?;
     let mut hasher = Sha256::new();
     hasher.input(value_bytes);
     let value_hash = hasher.result();
@@ -155,15 +165,17 @@ pub fn validate_hash_chain(message_bytes: &[u8], previous_msg_bytes: Option<&[u8
     let message_actual_multihash = Multihash::from_sha256(value_hash.into(), Target::Message);
 
     // The hash of the "value" must match the claimed value stored in the "key"
-    ensure!(message_actual_multihash == message.key, ActualHashDidNotMatchKey);
-
+    ensure!(
+        message_actual_multihash == message.key,
+        ActualHashDidNotMatchKey
+    );
 
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::validate_hash_chain;
+    use crate::{validate_hash_chain, Error};
 
     #[test]
     fn it_works_first_message() {
@@ -172,6 +184,81 @@ mod tests {
     #[test]
     fn it_works_second_message() {
         assert!(validate_hash_chain(MESSAGE_2.as_bytes(), Some(MESSAGE_1.as_bytes())).is_ok());
+    }
+    #[test]
+    fn first_message_must_have_previous_of_null() {
+        let result = validate_hash_chain(MESSAGE_1_INVALID_PREVIOUS.as_bytes(), None);
+        match result {
+            Err(Error::FirstMessageDidNotHavePreviousOfNull { message: _ }) => {}
+            _ => panic!(),
+        }
+    }
+    #[test]
+    fn first_message_must_have_sequence_of_one() {
+        let result = validate_hash_chain(MESSAGE_1_INVALID_SEQ.as_bytes(), None);
+        match result {
+            Err(Error::FirstMessageDidNotHaveSequenceOfOne { message: _ }) => {}
+            _ => panic!(),
+        }
+    }
+    #[test]
+    fn it_detects_incorrect_seq() {
+        let result = validate_hash_chain(
+            MESSAGE_2_INCORRECT_SEQUENCE.as_bytes(),
+            Some(MESSAGE_1.as_bytes()),
+        );
+        match result {
+            Err(Error::InvalidSequenceNumber {
+                message: _,
+                actual,
+                expected,
+            }) => {
+                assert_eq!(actual, 3);
+                assert_eq!(expected, 2);
+            }
+            _ => panic!(),
+        }
+    }
+    #[test]
+    fn it_detects_incorrect_author() {
+        let result = validate_hash_chain(
+            MESSAGE_2_INCORRECT_AUTHOR.as_bytes(),
+            Some(MESSAGE_1.as_bytes()),
+        );
+        match result {
+            Err(Error::AuthorsDidNotMatch{previous_author: _, author: _}) => {}
+            _ => panic!(),
+        }
+    }
+    #[test]
+    fn it_detects_incorrect_previous_of_null() {
+        let result = validate_hash_chain(
+            MESSAGE_2_PREVIOUS_NULL.as_bytes(),
+            Some(MESSAGE_1.as_bytes()),
+        );
+        match result {
+            Err(Error::PreviousWasNull) => {}
+            _ => panic!(),
+        }
+    }
+    #[test]
+    fn it_detects_incorrect_key() {
+        let result = validate_hash_chain(
+            MESSAGE_2_INCORRECT_KEY.as_bytes(),
+            Some(MESSAGE_1.as_bytes()),
+        );
+        match result {
+            Err(Error::ActualHashDidNotMatchKey) => {}
+            _ => panic!(),
+        }
+    }
+    #[test]
+    fn it_detects_fork() {
+        let result = validate_hash_chain(MESSAGE_2_FORK.as_bytes(), Some(MESSAGE_1.as_bytes()));
+        match result {
+            Err(Error::ForkedFeed { previous_seq: 1 }) => {}
+            _ => panic!(),
+        }
     }
 
     const MESSAGE_1: &str = r##"{
@@ -191,11 +278,164 @@ mod tests {
   },
   "timestamp": 1571140551481
 }"##;
+    const MESSAGE_1_INVALID_SEQ: &str = r##"{
+  "key": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
+  "value": {
+    "previous": null,
+    "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+    "sequence": 0,
+    "timestamp": 1470186877575,
+    "hash": "sha256",
+    "content": {
+      "type": "about",
+      "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+      "name": "Piet"
+    },
+    "signature": "QJKWui3oyK6r5dH13xHkEVFhfMZDTXfK2tW21nyfheFClSf69yYK77Itj1BGcOimZ16pj9u3tMArLUCGSscqCQ==.sig.ed25519"
+  },
+  "timestamp": 1571140551481
+}"##;
+    const MESSAGE_1_INVALID_PREVIOUS: &str = r##"{
+  "key": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
+  "value": {
+    "previous": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
+    "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+    "sequence": 1,
+    "timestamp": 1470186877575,
+    "hash": "sha256",
+    "content": {
+      "type": "about",
+      "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+      "name": "Piet"
+    },
+    "signature": "QJKWui3oyK6r5dH13xHkEVFhfMZDTXfK2tW21nyfheFClSf69yYK77Itj1BGcOimZ16pj9u3tMArLUCGSscqCQ==.sig.ed25519"
+  },
+  "timestamp": 1571140551481
+}"##;
 
     const MESSAGE_2: &str = r##"{
   "key": "%kLWDux4wCG+OdQWAHnpBGzGlCehqMLfgLbzlKCvgesU=.sha256",
   "value": {
     "previous": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
+    "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+    "sequence": 2,
+    "timestamp": 1470187292812,
+    "hash": "sha256",
+    "content": {
+      "type": "about",
+      "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+      "image": {
+        "link": "&MxwsfZoq7X6oqnEX/TWIlAqd6S+jsUA6T1hqZYdl7RM=.sha256",
+        "size": 642763,
+        "type": "image/png",
+        "width": 512,
+        "height": 512
+      }
+    },
+    "signature": "j3C7Us3JDnSUseF4ycRB0dTMs0xC6NAriAFtJWvx2uyz0K4zSj6XL8YA4BVqv+AHgo08+HxXGrpJlZ3ADwNnDw==.sig.ed25519"
+  },
+  "timestamp": 1571140551485
+}"##;
+
+    const MESSAGE_2_PREVIOUS_NULL: &str = r##"{
+  "key": "%kLWDux4wCG+OdQWAHnpBGzGlCehqMLfgLbzlKCvgesU=.sha256",
+  "value": {
+    "previous": null,
+    "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+    "sequence": 2,
+    "timestamp": 1470187292812,
+    "hash": "sha256",
+    "content": {
+      "type": "about",
+      "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+      "image": {
+        "link": "&MxwsfZoq7X6oqnEX/TWIlAqd6S+jsUA6T1hqZYdl7RM=.sha256",
+        "size": 642763,
+        "type": "image/png",
+        "width": 512,
+        "height": 512
+      }
+    },
+    "signature": "j3C7Us3JDnSUseF4ycRB0dTMs0xC6NAriAFtJWvx2uyz0K4zSj6XL8YA4BVqv+AHgo08+HxXGrpJlZ3ADwNnDw==.sig.ed25519"
+  },
+  "timestamp": 1571140551485
+}"##;
+    //This message will not hash correctly AND would fail signature verification. But an attacker
+    //could publish a message that had correct hashes and signatures.
+    const MESSAGE_2_INCORRECT_AUTHOR: &str = r##"{
+  "key": "%kLWDux4wCG+OdQWAHnpBGzGlCehqMLfgLbzlKCvgesU=.sha256",
+  "value": {
+    "previous": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
+    "author": "@xzSRT0HSAqGuqu5HxJvqxtp2FJGpt5nRPIHMznLoBao=.ed25519",
+    "sequence": 2,
+    "timestamp": 1470187292812,
+    "hash": "sha256",
+    "content": {
+      "type": "about",
+      "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+      "image": {
+        "link": "&MxwsfZoq7X6oqnEX/TWIlAqd6S+jsUA6T1hqZYdl7RM=.sha256",
+        "size": 642763,
+        "type": "image/png",
+        "width": 512,
+        "height": 512
+      }
+    },
+    "signature": "j3C7Us3JDnSUseF4ycRB0dTMs0xC6NAriAFtJWvx2uyz0K4zSj6XL8YA4BVqv+AHgo08+HxXGrpJlZ3ADwNnDw==.sig.ed25519"
+  },
+  "timestamp": 1571140551485
+}"##;
+    const MESSAGE_2_INCORRECT_SEQUENCE: &str = r##"{
+  "key": "%kLWDux4wCG+OdQWAHnpBGzGlCehqMLfgLbzlKCvgesU=.sha256",
+  "value": {
+    "previous": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
+    "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+    "sequence": 3,
+    "timestamp": 1470187292812,
+    "hash": "sha256",
+    "content": {
+      "type": "about",
+      "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+      "image": {
+        "link": "&MxwsfZoq7X6oqnEX/TWIlAqd6S+jsUA6T1hqZYdl7RM=.sha256",
+        "size": 642763,
+        "type": "image/png",
+        "width": 512,
+        "height": 512
+      }
+    },
+    "signature": "j3C7Us3JDnSUseF4ycRB0dTMs0xC6NAriAFtJWvx2uyz0K4zSj6XL8YA4BVqv+AHgo08+HxXGrpJlZ3ADwNnDw==.sig.ed25519"
+  },
+  "timestamp": 1571140551485
+}"##;
+    const MESSAGE_2_INCORRECT_KEY: &str = r##"{
+  "key": "%KLWDux4wCG+OdQWAHnpBGzGlCehqMLfgLbzlKCvgesU=.sha256",
+  "value": {
+    "previous": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
+    "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+    "sequence": 2,
+    "timestamp": 1470187292812,
+    "hash": "sha256",
+    "content": {
+      "type": "about",
+      "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+      "image": {
+        "link": "&MxwsfZoq7X6oqnEX/TWIlAqd6S+jsUA6T1hqZYdl7RM=.sha256",
+        "size": 642763,
+        "type": "image/png",
+        "width": 512,
+        "height": 512
+      }
+    },
+    "signature": "j3C7Us3JDnSUseF4ycRB0dTMs0xC6NAriAFtJWvx2uyz0K4zSj6XL8YA4BVqv+AHgo08+HxXGrpJlZ3ADwNnDw==.sig.ed25519"
+  },
+  "timestamp": 1571140551485
+}"##;
+
+    const MESSAGE_2_FORK: &str = r##"{
+  "key": "%kLWDux4wCG+OdQWAHnpBGzGlCehqMLfgLbzlKCvgesU=.sha256",
+  "value": {
+    "previous": "%/V5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
     "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
     "sequence": 2,
     "timestamp": 1470187292812,
