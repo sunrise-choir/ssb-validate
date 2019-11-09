@@ -42,7 +42,7 @@ pub enum Error {
     #[snafu(display("Could not serialize message.value to bytes. Failed with: {}", source))]
     InvalidMessageCouldNotSerializeValue { source: EncodeJsonError },
     #[snafu(display("The actual hash of the value did not match the hash claimed by `key`"))]
-    ActualHashDidNotMatchKey,
+    ActualHashDidNotMatchKey{message: Vec<u8>},
     #[snafu(display("Previous was set to null but it should have had a value"))]
     PreviousWasNull,
     #[snafu(display(
@@ -167,7 +167,7 @@ pub fn validate_hash_chain(message_bytes: &[u8], previous_msg_bytes: Option<&[u8
     // The hash of the "value" must match the claimed value stored in the "key"
     ensure!(
         message_actual_multihash == message.key,
-        ActualHashDidNotMatchKey
+        ActualHashDidNotMatchKey{message: message_bytes.to_owned()}
     );
 
     Ok(())
@@ -248,7 +248,7 @@ mod tests {
             Some(MESSAGE_1.as_bytes()),
         );
         match result {
-            Err(Error::ActualHashDidNotMatchKey) => {}
+            Err(Error::ActualHashDidNotMatchKey{message: _}) => {}
             _ => panic!(),
         }
     }
