@@ -14,4 +14,3 @@ snafu = "0.6.0"
 ssb-legacy-msg-data = { git="https://github.com/sunrise-choir/legacy-msg-data", version = "0.1.1" }
 ssb-multiformats = {git="https://github.com/sunrise-choir/ssb-multiformats"}
 ssb-verify-signatures = {git = "https://github.com/sunrise-choir/ssb-verify-signatures"}
-

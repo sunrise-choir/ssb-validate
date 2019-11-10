@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
-use ssb_legacy_msg_data::json::{from_slice, to_vec, DecodeJsonError, EncodeJsonError};
+use ssb_legacy_msg_data::json::{from_slice, to_string, DecodeJsonError, EncodeJsonError};
 use ssb_legacy_msg_data::value::Value;
 use ssb_legacy_msg_data::LegacyF64;
 use ssb_multiformats::multihash::{Multihash, Target};
@@ -42,7 +42,11 @@ pub enum Error {
     #[snafu(display("Could not serialize message.value to bytes. Failed with: {}", source))]
     InvalidMessageCouldNotSerializeValue { source: EncodeJsonError },
     #[snafu(display("The actual hash of the value did not match the hash claimed by `key`"))]
-    ActualHashDidNotMatchKey{message: Vec<u8>},
+    ActualHashDidNotMatchKey {
+        message: Vec<u8>,
+        actual_hash: Multihash,
+        expected_hash: Multihash,
+    },
     #[snafu(display("Previous was set to null but it should have had a value"))]
     PreviousWasNull,
     #[snafu(display(
@@ -157,20 +161,38 @@ pub fn validate_hash_chain(message_bytes: &[u8], previous_msg_bytes: Option<&[u8
 
     // Get the "value" from the message as bytes that we can hash.
     let value_bytes =
-        to_vec(verifiable_msg_value, false).context(InvalidMessageCouldNotSerializeValue)?;
-    let mut hasher = Sha256::new();
-    hasher.input(value_bytes);
-    let value_hash = hasher.result();
+        to_string(verifiable_msg_value, false).context(InvalidMessageCouldNotSerializeValue)?;
+    let value_bytes_latin = node_buffer_binary_serializer(&value_bytes);
+    let value_hash = Sha256::digest(value_bytes_latin.as_slice());
+    let mut vec = vec![];
+    let arr: &[u8; 32] = &value_hash.into();
+    vec.extend_from_slice(arr);
 
     let message_actual_multihash = Multihash::from_sha256(value_hash.into(), Target::Message);
 
     // The hash of the "value" must match the claimed value stored in the "key"
     ensure!(
         message_actual_multihash == message.key,
-        ActualHashDidNotMatchKey{message: message_bytes.to_owned()}
+        ActualHashDidNotMatchKey {
+            message: message_bytes.to_owned(),
+            actual_hash: message_actual_multihash,
+            expected_hash: message.key,
+        }
     );
 
     Ok(())
+}
+
+/// FML, scuttlebutt is miserable.
+///
+/// This is what node's `Buffer.new(messageString, 'binary')` does. Who knew.
+/// So, surprise, but the way ssb encodes messages for signing vs the way it encodes them for
+/// hashing is different.
+///
+fn node_buffer_binary_serializer(text: &str) -> Vec<u8> {
+    text.encode_utf16()
+        .map(|word| (word & 0xFF) as u8)
+        .collect()
 }
 
 #[cfg(test)]
@@ -226,7 +248,10 @@ mod tests {
             Some(MESSAGE_1.as_bytes()),
         );
         match result {
-            Err(Error::AuthorsDidNotMatch{previous_author: _, author: _}) => {}
+            Err(Error::AuthorsDidNotMatch {
+                previous_author: _,
+                author: _,
+            }) => {}
             _ => panic!(),
         }
     }
@@ -248,7 +273,11 @@ mod tests {
             Some(MESSAGE_1.as_bytes()),
         );
         match result {
-            Err(Error::ActualHashDidNotMatchKey{message: _}) => {}
+            Err(Error::ActualHashDidNotMatchKey {
+                message: _,
+                expected_hash: _,
+                actual_hash: _,
+            }) => {}
             _ => panic!(),
         }
     }
@@ -259,6 +288,16 @@ mod tests {
             Err(Error::ForkedFeed { previous_seq: 1 }) => {}
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn it_validates_a_message_with_unicode() {
+        let result = validate_hash_chain(
+            MESSAGE_WITH_UNICODE.as_bytes(),
+            Some(MESSAGE_WITH_UNICODE_PREV.as_bytes()),
+        );
+
+        assert!(result.is_ok());
     }
 
     const MESSAGE_1: &str = r##"{
@@ -454,5 +493,44 @@ mod tests {
     "signature": "j3C7Us3JDnSUseF4ycRB0dTMs0xC6NAriAFtJWvx2uyz0K4zSj6XL8YA4BVqv+AHgo08+HxXGrpJlZ3ADwNnDw==.sig.ed25519"
   },
   "timestamp": 1571140551485
+}"##;
+
+    const MESSAGE_WITH_UNICODE: &str = r##"{
+  "key": "%lYAK7Lfigw00zMt/UtVg5Ol9XdR4BHWUCxq4r2Ops90=.sha256",
+  "value": {
+    "previous": "%yV9QaYDbkEHl4W8S8hVf/3TUuvs0JUrOP945jLLK/2c=.sha256",
+    "author": "@vt8uK0++cpFioCCBeB3p3jdx4RIdQYJOL/imN1Hv0Wk=.ed25519",
+    "sequence": 36,
+    "timestamp": 1445502075082,
+    "hash": "sha256",
+    "content": {
+      "type": "post",
+      "text": "Web frameworks.\n\n    Much industrial production in the late nineteenth century depended on skilled workers, whose knowledge of the production process often far exceeded their employers’; Taylor saw that this gave laborers a tremendous advantage over their employer in the struggle over the pace of work.\n\n    Not only could capitalists not legislate techniques they were ignorant of, but they were also in no position to judge when workers told them the process simply couldn’t be driven any faster. Work had to be redesigned so that employers did not depend on their employees for knowledge of the production process.\n\nhttps://www.jacobinmag.com/2015/04/braverman-gramsci-marx-technology/"
+    },
+    "signature": "FbDXlQtC2FQukU8svM5dOALN6QpxFhUHZaC7jTSXdOH7yqDfUlaj8q97YLdo5YqknZ71b0Y59hlQkmfkbtv5DA==.sig.ed25519"
+  },
+  "timestamp": 1571140555382.0059
+}"##;
+
+    const MESSAGE_WITH_UNICODE_PREV: &str = r##"{
+  "key": "%yV9QaYDbkEHl4W8S8hVf/3TUuvs0JUrOP945jLLK/2c=.sha256",
+  "value": {
+    "previous": "%fG8VUZqsl1034p8W+q3vFggEB074qj0hmRPamqq5TH4=.sha256",
+    "author": "@vt8uK0++cpFioCCBeB3p3jdx4RIdQYJOL/imN1Hv0Wk=.ed25519",
+    "sequence": 35,
+    "timestamp": 1445499413793,
+    "hash": "sha256",
+    "content": {
+      "type": "post",
+      "text": "something non-linear is happening between 15 and 20 nodes [results.txt](&cwcDjgpJoPG1vjICsTutqfBi1gpNPa8ggl4fep1qCXc=.sha256)",
+      "mentions": [
+        {
+          "link": "&cwcDjgpJoPG1vjICsTutqfBi1gpNPa8ggl4fep1qCXc=.sha256"
+        }
+      ]
+    },
+    "signature": "9Dh6hj/gdrruYNh/rkELEJrk0+quhQF1VfU7veJ8Yb/cDUHzaQWue2YljRuERThlyd+92cOfA4PujfNC2VbTDA==.sig.ed25519"
+  },
+  "timestamp": 1571140555382.002
 }"##;
 }
