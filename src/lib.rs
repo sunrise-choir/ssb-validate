@@ -101,7 +101,7 @@ where
         .collect::<Result<()>>()
 }
 
-/// Check that a message is a valid message relative to it's previous message.
+/// Check that a message is a valid message relative to the previous message.
 ///
 /// This checks that:
 /// - the sequence starts at one if it's the first message
@@ -114,6 +114,7 @@ where
 /// This does not check:
 /// - the signature. See ssb-verify-signatures which lets you to batch verification of signatures.
 ///
+/// `previous_msg_bytes` will be `None` only when `message_bytes` is the first message by that author. 
 pub fn validate_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     message_bytes: T,
     previous_msg_bytes: Option<U>,
