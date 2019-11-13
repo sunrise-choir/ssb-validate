@@ -1,3 +1,4 @@
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
@@ -72,7 +73,35 @@ struct SsbMessage {
     value: SsbMessageValue,
 }
 
-/// Check that a message is a valid relative to it's previous message.
+/// Batch validates a collection of messages, **all by the same author, ordered by ascending sequence
+/// number, with no missing messages**.
+pub fn par_validate_hash_chain_of_feed<T: AsRef<[u8]>, U: AsRef<[u8]>>(
+    messages: &[T],
+    previous: Option<U>,
+) -> Result<()>
+where
+    [T]: ParallelSlice<T>,
+    T: Sync,
+    U: Sync + Send + Copy,
+{
+    messages
+        .par_iter()
+        .enumerate()
+        .map(|(idx, msg)| {
+            if idx == 0 {
+                let prev = match previous {
+                    Some(prev) => Some(prev.as_ref().to_owned()),
+                    _ => None,
+                };
+                validate_hash_chain(msg.as_ref(), prev)
+            } else {
+                validate_hash_chain(msg.as_ref(), Some(messages[idx - 1].as_ref()))
+            }
+        })
+        .collect::<Result<()>>()
+}
+
+/// Check that a message is a valid message relative to it's previous message.
 ///
 /// This checks that:
 /// - the sequence starts at one if it's the first message
@@ -85,12 +114,16 @@ struct SsbMessage {
 /// This does not check:
 /// - the signature. See ssb-verify-signatures which lets you to batch verification of signatures.
 ///
-pub fn validate_hash_chain(message_bytes: &[u8], previous_msg_bytes: Option<&[u8]>) -> Result<()> {
+pub fn validate_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
+    message_bytes: T,
+    previous_msg_bytes: Option<U>,
+) -> Result<()> {
+    let message_bytes = message_bytes.as_ref();
     // msg seq is 1 larger than previous
     let previous_message = match previous_msg_bytes {
-        Some(message) => Some(from_slice::<SsbMessage>(message).context(
+        Some(message) => Some(from_slice::<SsbMessage>(message.as_ref()).context(
             InvalidPreviousMessage {
-                message: message.to_owned(),
+                message: message.as_ref().to_owned(),
             },
         )?),
         None => None,
@@ -164,9 +197,6 @@ pub fn validate_hash_chain(message_bytes: &[u8], previous_msg_bytes: Option<&[u8
         to_string(verifiable_msg_value, false).context(InvalidMessageCouldNotSerializeValue)?;
     let value_bytes_latin = node_buffer_binary_serializer(&value_bytes);
     let value_hash = Sha256::digest(value_bytes_latin.as_slice());
-    let mut vec = vec![];
-    let arr: &[u8; 32] = &value_hash.into();
-    vec.extend_from_slice(arr);
 
     let message_actual_multihash = Multihash::from_sha256(value_hash.into(), Target::Message);
 
@@ -185,7 +215,7 @@ pub fn validate_hash_chain(message_bytes: &[u8], previous_msg_bytes: Option<&[u8
 
 /// FML, scuttlebutt is miserable.
 ///
-/// This is what node's `Buffer.new(messageString, 'binary')` does. Who knew.
+/// This is what node's `Buffer.new(messageString, 'binary')` does. Who knew?
 /// So, surprise, but the way ssb encodes messages for signing vs the way it encodes them for
 /// hashing is different.
 ///
@@ -197,19 +227,34 @@ fn node_buffer_binary_serializer(text: &str) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{validate_hash_chain, Error};
+    use crate::{par_validate_hash_chain_of_feed, validate_hash_chain, Error};
 
     #[test]
     fn it_works_first_message() {
-        assert!(validate_hash_chain(MESSAGE_1.as_bytes(), None).is_ok());
+        assert!(validate_hash_chain::<_, &[u8]>(MESSAGE_1.as_bytes(), None).is_ok());
     }
     #[test]
     fn it_works_second_message() {
         assert!(validate_hash_chain(MESSAGE_2.as_bytes(), Some(MESSAGE_1.as_bytes())).is_ok());
     }
+
+    #[test]
+    fn par_validate_hash_chain_of_feed_first_messages_works() {
+        let messages = [MESSAGE_1.as_bytes(), MESSAGE_2.as_bytes()];
+
+        let result = par_validate_hash_chain_of_feed::<_, &[u8]>(&messages[..], None);
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn par_validate_hash_chain_of_feed_with_prev_works() {
+        let messages = [MESSAGE_2.as_bytes(), MESSAGE_3.as_bytes()];
+
+        let result = par_validate_hash_chain_of_feed(&messages[..], Some(MESSAGE_1.as_bytes()));
+        assert!(result.is_ok());
+    }
     #[test]
     fn first_message_must_have_previous_of_null() {
-        let result = validate_hash_chain(MESSAGE_1_INVALID_PREVIOUS.as_bytes(), None);
+        let result = validate_hash_chain::<_, &[u8]>(MESSAGE_1_INVALID_PREVIOUS.as_bytes(), None);
         match result {
             Err(Error::FirstMessageDidNotHavePreviousOfNull { message: _ }) => {}
             _ => panic!(),
@@ -217,7 +262,7 @@ mod tests {
     }
     #[test]
     fn first_message_must_have_sequence_of_one() {
-        let result = validate_hash_chain(MESSAGE_1_INVALID_SEQ.as_bytes(), None);
+        let result = validate_hash_chain::<_, &[u8]>(MESSAGE_1_INVALID_SEQ.as_bytes(), None);
         match result {
             Err(Error::FirstMessageDidNotHaveSequenceOfOne { message: _ }) => {}
             _ => panic!(),
@@ -375,6 +420,26 @@ mod tests {
   },
   "timestamp": 1571140551485
 }"##;
+
+    const MESSAGE_3: &str = r##"{
+  "key": "%VhHgLpaLfY/2/g4+WEhKv5DdXM1V1PCVW1u2kbkvTbY=.sha256",
+  "value": {
+    "previous": "%kLWDux4wCG+OdQWAHnpBGzGlCehqMLfgLbzlKCvgesU=.sha256",
+    "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+    "sequence": 3,
+    "timestamp": 1470187303671,
+    "hash": "sha256",
+    "content": {
+      "type": "contact",
+      "contact": "@8HsIHUvTaWg8IXHpsb8dmDtKH8qLOrSNwNm298OkGoY=.ed25519",
+      "following": true,
+      "blocking": false
+    },
+    "signature": "PWhsT9c8HQMhJEohV0tF5mfSnZy0rU0CInnvah+whlMuYDQAjzpmW9be9X8eWVAsqbepS+5I7A7ttvwEonSaBg==.sig.ed25519"
+  },
+  "timestamp": 1571140551497
+}"##;
+    
 
     const MESSAGE_2_PREVIOUS_NULL: &str = r##"{
   "key": "%kLWDux4wCG+OdQWAHnpBGzGlCehqMLfgLbzlKCvgesU=.sha256",
