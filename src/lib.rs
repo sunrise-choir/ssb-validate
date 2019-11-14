@@ -10,6 +10,12 @@
 //!
 //! You can check messages one by one or batch process a collection of them (uses [rayon](https://docs.rs/rayon/1.2.0/rayon/index.html) internally)
 //!
+//! ## Benchmarks
+//!
+//! Benchmarking on a 2016 2 core i5 shows that batch processing  is ~1.6 times faster than processing one at a time.
+//!
+//! Benchmarking on Android on a [One Plus 5T](https://en.wikipedia.org/wiki/OnePlus_5T) (8 core arm64) shows that batch processing is ~3.3 times faster.
+//!
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

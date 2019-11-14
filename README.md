@@ -18,3 +18,10 @@ To be a valid message,
 - If the message includes the key, it must be that hash of the value of the message..
 
 You can check messages one by one or batch process a collection of them (uses [rayon](https://docs.rs/rayon/1.2.0/rayon/index.html) internally)
+
+## Benchmarks
+
+Benchmarking on a 2016 2 core i5 shows that batch processing  is ~3.6 times faster than using [verify_message] 
+
+Benchmarking on Android on a [One Plus 5T](https://en.wikipedia.org/wiki/OnePlus_5T) (8 core arm64) shows that batch processing with [par_verify_messages] is ~9.9 times faster than using [verify_message]! 
+
