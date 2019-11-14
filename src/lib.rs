@@ -1,3 +1,14 @@
+//! Verify Secure Scuttlebutt (SSB) hash chains (in parallel)
+//!
+//! Secure Scuttlebutt "feeds" are a sequence of messages published by one author.
+//! To be a valid message,
+//! - each message must include the hash of the preceding message
+//! - the sequence number must be one larger than the preceding message
+//! - the author must not change compared to the last preceding message
+//! - If it's the first message in a feed, the sequence must be 1 and the previous must be null.
+//!
+//! You can check messages one by one or batch process a collection of them (uses [rayon](https://docs.rs/rayon/1.2.0/rayon/index.html) internally)
+//!
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -76,8 +87,61 @@ struct SsbMessage {
 /// Batch validates a collection of messages, **all by the same author, ordered by ascending sequence
 /// number, with no missing messages**.
 ///
-/// This will mainly useful during replication. Collect all the latest messages from a feed you're
+/// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
+///
+/// This will mainly be useful during replication. Collect all the latest messages from a feed you're
 /// replicating and batch validate all the messages at once.
+///
+/// # Example
+///```
+///use ssb_validate::par_validate_message_hash_chain_of_feed;
+///let valid_message_1 = r##"{
+///  "key": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
+///  "value": {
+///    "previous": null,
+///    "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+///    "sequence": 1,
+///    "timestamp": 1470186877575,
+///    "hash": "sha256",
+///    "content": {
+///      "type": "about",
+///      "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+///      "name": "Piet"
+///    },
+///    "signature": "QJKWui3oyK6r5dH13xHkEVFhfMZDTXfK2tW21nyfheFClSf69yYK77Itj1BGcOimZ16pj9u3tMArLUCGSscqCQ==.sig.ed25519"
+///  },
+///  "timestamp": 1571140551481
+///}"##;
+///let valid_message_2 = r##"{
+///  "key": "%kLWDux4wCG+OdQWAHnpBGzGlCehqMLfgLbzlKCvgesU=.sha256",
+///  "value": {
+///    "previous": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
+///    "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+///    "sequence": 2,
+///    "timestamp": 1470187292812,
+///    "hash": "sha256",
+///    "content": {
+///      "type": "about",
+///      "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+///      "image": {
+///        "link": "&MxwsfZoq7X6oqnEX/TWIlAqd6S+jsUA6T1hqZYdl7RM=.sha256",
+///        "size": 642763,
+///        "type": "image/png",
+///        "width": 512,
+///        "height": 512
+///      }
+///    },
+///    "signature": "j3C7Us3JDnSUseF4ycRB0dTMs0xC6NAriAFtJWvx2uyz0K4zSj6XL8YA4BVqv+AHgo08+HxXGrpJlZ3ADwNnDw==.sig.ed25519"
+///  },
+///  "timestamp": 1571140551485
+///}"##;
+/// let messages = [valid_message_1.as_bytes(), valid_message_2.as_bytes()];
+/// // If you're passing `None` as the `previous` argument you'll need to give the compiler a hint about
+/// // the type.
+/// let result = par_validate_message_hash_chain_of_feed::<_, &[u8]>(&messages, None);
+/// assert!(result.is_ok());
+///```
+
 pub fn par_validate_message_hash_chain_of_feed<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     messages: &[T],
     previous: Option<U>,
@@ -110,8 +174,60 @@ where
 /// Batch validates a collection of message values, **all by the same author, ordered by ascending sequence
 /// number, with no missing messages**.
 ///
-/// This will mainly useful during replication. Collect all the latest messages from a feed you're
+/// It expects the messages to be the JSON encoded message value of shape: `{
+/// previous: "",
+/// author: "",
+/// sequence: ...,
+/// timestamp: ...,
+/// content: {},
+/// signature: ""
+/// }`
+///
+/// This will mainly be useful during replication. Collect all the latest messages from a feed you're
 /// replicating and batch validate all the messages at once.
+///
+/// # Example
+///```
+///use ssb_validate::par_validate_message_value_hash_chain_of_feed;
+///let valid_message_1 = r##"{
+///  "previous": null,
+///  "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+///  "sequence": 1,
+///  "timestamp": 1470186877575,
+///  "hash": "sha256",
+///  "content": {
+///    "type": "about",
+///    "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+///    "name": "Piet"
+///  },
+///  "signature": "QJKWui3oyK6r5dH13xHkEVFhfMZDTXfK2tW21nyfheFClSf69yYK77Itj1BGcOimZ16pj9u3tMArLUCGSscqCQ==.sig.ed25519"
+///}"##;
+///let valid_message_2 = r##"{
+///  "previous": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
+///  "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+///  "sequence": 2,
+///  "timestamp": 1470187292812,
+///  "hash": "sha256",
+///  "content": {
+///    "type": "about",
+///    "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+///    "image": {
+///      "link": "&MxwsfZoq7X6oqnEX/TWIlAqd6S+jsUA6T1hqZYdl7RM=.sha256",
+///      "size": 642763,
+///      "type": "image/png",
+///      "width": 512,
+///      "height": 512
+///    }
+///  },
+///  "signature": "j3C7Us3JDnSUseF4ycRB0dTMs0xC6NAriAFtJWvx2uyz0K4zSj6XL8YA4BVqv+AHgo08+HxXGrpJlZ3ADwNnDw==.sig.ed25519"
+///}"##;
+/// let messages = [valid_message_1.as_bytes(), valid_message_2.as_bytes()];
+/// // If you're passing `None` as the `previous` argument you'll need to give the compiler a hint about
+/// // the type.
+/// let result = par_validate_message_value_hash_chain_of_feed::<_, &[u8]>(&messages, None);
+/// assert!(result.is_ok());
+///```
+
 pub fn par_validate_message_value_hash_chain_of_feed<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     messages: &[T],
     previous: Option<U>,
@@ -134,7 +250,10 @@ where
                     };
                     validate_message_value_hash_chain(msg.as_ref(), prev)
                 } else {
-                    validate_message_value_hash_chain(msg.as_ref(), Some(messages[idx - 1].as_ref()))
+                    validate_message_value_hash_chain(
+                        msg.as_ref(),
+                        Some(messages[idx - 1].as_ref()),
+                    )
                 }
             },
         )
@@ -142,6 +261,8 @@ where
 }
 
 /// Check that a message is a valid message relative to the previous message.
+///
+/// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
 ///
 /// This checks that:
 /// - the sequence starts at one if it's the first message
@@ -155,6 +276,53 @@ where
 /// - the signature. See ssb-verify-signatures which lets you to batch verification of signatures.
 ///
 /// `previous_msg_bytes` will be `None` only when `message_bytes` is the first message by that author.
+///
+/// # Example
+///```
+///use ssb_validate::validate_message_hash_chain;
+///let valid_message_1 = r##"{
+///  "key": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
+///  "value": {
+///    "previous": null,
+///    "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+///    "sequence": 1,
+///    "timestamp": 1470186877575,
+///    "hash": "sha256",
+///    "content": {
+///      "type": "about",
+///      "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+///      "name": "Piet"
+///    },
+///    "signature": "QJKWui3oyK6r5dH13xHkEVFhfMZDTXfK2tW21nyfheFClSf69yYK77Itj1BGcOimZ16pj9u3tMArLUCGSscqCQ==.sig.ed25519"
+///  },
+///  "timestamp": 1571140551481
+///}"##;
+///let valid_message_2 = r##"{
+///  "key": "%kLWDux4wCG+OdQWAHnpBGzGlCehqMLfgLbzlKCvgesU=.sha256",
+///  "value": {
+///    "previous": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
+///    "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+///    "sequence": 2,
+///    "timestamp": 1470187292812,
+///    "hash": "sha256",
+///    "content": {
+///      "type": "about",
+///      "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+///      "image": {
+///        "link": "&MxwsfZoq7X6oqnEX/TWIlAqd6S+jsUA6T1hqZYdl7RM=.sha256",
+///        "size": 642763,
+///        "type": "image/png",
+///        "width": 512,
+///        "height": 512
+///      }
+///    },
+///    "signature": "j3C7Us3JDnSUseF4ycRB0dTMs0xC6NAriAFtJWvx2uyz0K4zSj6XL8YA4BVqv+AHgo08+HxXGrpJlZ3ADwNnDw==.sig.ed25519"
+///  },
+///  "timestamp": 1571140551485
+///}"##;
+/// let result = validate_message_hash_chain(valid_message_2.as_bytes(), Some(valid_message_1));
+/// assert!(result.is_ok());
+///```
 pub fn validate_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     message_bytes: T,
     previous_msg_bytes: Option<U>,
@@ -215,6 +383,69 @@ pub fn validate_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     Ok(())
 }
 
+/// Check that a message is a valid message relative to the previous message.
+///
+/// It expects the messages to be the JSON encoded message value of shape: `{
+/// previous: "",
+/// author: "",
+/// sequence: ...,
+/// timestamp: ...,
+/// content: {},
+/// signature: ""
+/// }`
+///
+/// This checks that:
+/// - the sequence starts at one if it's the first message
+/// - the previous is correctly set to null if it's the first message
+/// - the sequence increments correctly
+/// - the author has not changed
+/// - the feed is not forked
+///
+/// This does not check:
+/// - the signature. See ssb-verify-signatures which lets you to batch verification of signatures.
+///
+/// `previous_msg_bytes` will be `None` only when `message_bytes` is the first message by that author.
+///
+/// # Example
+///```
+///use ssb_validate::validate_message_value_hash_chain;
+///let valid_message_1 = r##"{
+///  "previous": null,
+///  "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+///  "sequence": 1,
+///  "timestamp": 1470186877575,
+///  "hash": "sha256",
+///  "content": {
+///    "type": "about",
+///    "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+///    "name": "Piet"
+///  },
+///  "signature": "QJKWui3oyK6r5dH13xHkEVFhfMZDTXfK2tW21nyfheFClSf69yYK77Itj1BGcOimZ16pj9u3tMArLUCGSscqCQ==.sig.ed25519"
+///}"##;
+///let valid_message_2 = r##"{
+///  "previous": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
+///  "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+///  "sequence": 2,
+///  "timestamp": 1470187292812,
+///  "hash": "sha256",
+///  "content": {
+///    "type": "about",
+///    "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+///    "image": {
+///      "link": "&MxwsfZoq7X6oqnEX/TWIlAqd6S+jsUA6T1hqZYdl7RM=.sha256",
+///      "size": 642763,
+///      "type": "image/png",
+///      "width": 512,
+///      "height": 512
+///    }
+///  },
+///  "signature": "j3C7Us3JDnSUseF4ycRB0dTMs0xC6NAriAFtJWvx2uyz0K4zSj6XL8YA4BVqv+AHgo08+HxXGrpJlZ3ADwNnDw==.sig.ed25519"
+///}"##;
+///
+/// let result = validate_message_value_hash_chain(valid_message_2.as_bytes(),
+/// Some(valid_message_1.as_bytes()));
+/// assert!(result.is_ok());
+///```
 pub fn validate_message_value_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     message_bytes: T,
     previous_msg_bytes: Option<U>,
@@ -324,7 +555,10 @@ fn node_buffer_binary_serializer(text: &str) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{par_validate_message_hash_chain_of_feed, validate_message_hash_chain, Error};
+    use crate::{
+        par_validate_message_hash_chain_of_feed, validate_message_hash_chain,
+        validate_message_value_hash_chain, Error,
+    };
 
     #[test]
     fn it_works_first_message() {
@@ -337,6 +571,20 @@ mod tests {
         );
     }
 
+    #[test]
+    fn it_works_first_message_value() {
+        assert!(
+            validate_message_value_hash_chain::<_, &[u8]>(MESSAGE_VALUE_1.as_bytes(), None).is_ok()
+        );
+    }
+    #[test]
+    fn it_works_second_message_value() {
+        assert!(validate_message_value_hash_chain(
+            MESSAGE_VALUE_2.as_bytes(),
+            Some(MESSAGE_VALUE_1.as_bytes())
+        )
+        .is_ok());
+    }
     #[test]
     fn par_validate_message_hash_chain_of_feed_first_messages_works() {
         let messages = [MESSAGE_1.as_bytes(), MESSAGE_2.as_bytes()];
@@ -465,6 +713,19 @@ mod tests {
   },
   "timestamp": 1571140551481
 }"##;
+    const MESSAGE_VALUE_1: &str = r##"{
+  "previous": null,
+  "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+  "sequence": 1,
+  "timestamp": 1470186877575,
+  "hash": "sha256",
+  "content": {
+    "type": "about",
+    "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+    "name": "Piet"
+  },
+  "signature": "QJKWui3oyK6r5dH13xHkEVFhfMZDTXfK2tW21nyfheFClSf69yYK77Itj1BGcOimZ16pj9u3tMArLUCGSscqCQ==.sig.ed25519"
+}"##;
     const MESSAGE_1_INVALID_SEQ: &str = r##"{
   "key": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
   "value": {
@@ -524,6 +785,25 @@ mod tests {
   "timestamp": 1571140551485
 }"##;
 
+    const MESSAGE_VALUE_2: &str = r##"{
+  "previous": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
+  "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+  "sequence": 2,
+  "timestamp": 1470187292812,
+  "hash": "sha256",
+  "content": {
+    "type": "about",
+    "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+    "image": {
+      "link": "&MxwsfZoq7X6oqnEX/TWIlAqd6S+jsUA6T1hqZYdl7RM=.sha256",
+      "size": 642763,
+      "type": "image/png",
+      "width": 512,
+      "height": 512
+    }
+  },
+  "signature": "j3C7Us3JDnSUseF4ycRB0dTMs0xC6NAriAFtJWvx2uyz0K4zSj6XL8YA4BVqv+AHgo08+HxXGrpJlZ3ADwNnDw==.sig.ed25519"
+}"##;
     const MESSAGE_3: &str = r##"{
   "key": "%VhHgLpaLfY/2/g4+WEhKv5DdXM1V1PCVW1u2kbkvTbY=.sha256",
   "value": {
