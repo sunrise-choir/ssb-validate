@@ -1,22 +1,20 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use ssb_validate::{par_validate_hash_chain_of_feed, validate_hash_chain};
 use flumedb::OffsetLog;
+use ssb_validate::{par_validate_hash_chain_of_feed, validate_hash_chain};
 
 pub fn verify_bench(c: &mut Criterion) {
-
     let in_log = OffsetLog::<u32>::open_read_only("./test_vecs/piet.offset").unwrap();
 
     let msgs = in_log
         .iter()
         .map(|entry| entry.data)
-        .take(1)
+        .take(2)
         .collect::<Vec<_>>();
 
     c.bench_function("verify", |b| {
         b.iter(|| {
-            let res =validate_hash_chain::<_, &[u8]>(black_box(msgs[0].clone()), None);
+            let res = validate_hash_chain::<_, &[u8]>(black_box(msgs[1].clone()), Some(&msgs[0]));
             assert!(res.is_ok());
-
         })
     });
 }
@@ -46,4 +44,3 @@ criterion_group! {
 criterion_group!(verify_single, verify_bench);
 
 criterion_main!(verify_batch, verify_single);
-

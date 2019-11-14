@@ -87,18 +87,21 @@ where
     messages
         .par_iter()
         .enumerate()
-        .map(|(idx, msg)| {
-            if idx == 0 {
-                let prev = match previous {
-                    Some(prev) => Some(prev.as_ref().to_owned()),
-                    _ => None,
-                };
-                validate_hash_chain(msg.as_ref(), prev)
-            } else {
-                validate_hash_chain(msg.as_ref(), Some(messages[idx - 1].as_ref()))
-            }
-        })
-        .collect::<Result<()>>()
+        .try_fold(
+            || (),
+            |_, (idx, msg)| {
+                if idx == 0 {
+                    let prev = match previous {
+                        Some(prev) => Some(prev.as_ref().to_owned()),
+                        _ => None,
+                    };
+                    validate_hash_chain(msg.as_ref(), prev)
+                } else {
+                    validate_hash_chain(msg.as_ref(), Some(messages[idx - 1].as_ref()))
+                }
+            },
+        )
+        .try_reduce(|| (), |_, _| Ok(()))
 }
 
 /// Check that a message is a valid message relative to the previous message.
@@ -114,7 +117,7 @@ where
 /// This does not check:
 /// - the signature. See ssb-verify-signatures which lets you to batch verification of signatures.
 ///
-/// `previous_msg_bytes` will be `None` only when `message_bytes` is the first message by that author. 
+/// `previous_msg_bytes` will be `None` only when `message_bytes` is the first message by that author.
 pub fn validate_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     message_bytes: T,
     previous_msg_bytes: Option<U>,
@@ -440,7 +443,6 @@ mod tests {
   },
   "timestamp": 1571140551497
 }"##;
-    
 
     const MESSAGE_2_PREVIOUS_NULL: &str = r##"{
   "key": "%kLWDux4wCG+OdQWAHnpBGzGlCehqMLfgLbzlKCvgesU=.sha256",
