@@ -1,6 +1,13 @@
+[![Build Status](https://travis-ci.org/sunrise-choir/ssb-validate.svg?branch=master)](https://travis-ci.org/sunrise-choir/ssb-validate)
 # ssb-validate
 
 > Verify Secure Scuttlebutt (SSB) hash chains (in parallel)
+
+## Docs
+
+[Rustdocs](https://sunrise-choir.github.io/ssb-validate/ssb_validate/index.html)
+
+## About
 
 Secure Scuttlebutt "feeds" are a sequence of messages published by one author.
 To be a valid message,
