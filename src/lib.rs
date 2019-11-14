@@ -2,7 +2,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
-use ssb_legacy_msg_data::json::{from_slice, to_string, DecodeJsonError, EncodeJsonError};
+use ssb_legacy_msg_data::json::{from_slice, to_vec, DecodeJsonError, EncodeJsonError};
 use ssb_legacy_msg_data::value::Value;
 use ssb_legacy_msg_data::LegacyF64;
 use ssb_multiformats::multihash::{Multihash, Target};
@@ -75,7 +75,10 @@ struct SsbMessage {
 
 /// Batch validates a collection of messages, **all by the same author, ordered by ascending sequence
 /// number, with no missing messages**.
-pub fn par_validate_hash_chain_of_feed<T: AsRef<[u8]>, U: AsRef<[u8]>>(
+///
+/// This will mainly useful during replication. Collect all the latest messages from a feed you're
+/// replicating and batch validate all the messages at once.
+pub fn par_validate_message_hash_chain_of_feed<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     messages: &[T],
     previous: Option<U>,
 ) -> Result<()>
@@ -95,9 +98,43 @@ where
                         Some(prev) => Some(prev.as_ref().to_owned()),
                         _ => None,
                     };
-                    validate_hash_chain(msg.as_ref(), prev)
+                    validate_message_hash_chain(msg.as_ref(), prev)
                 } else {
-                    validate_hash_chain(msg.as_ref(), Some(messages[idx - 1].as_ref()))
+                    validate_message_hash_chain(msg.as_ref(), Some(messages[idx - 1].as_ref()))
+                }
+            },
+        )
+        .try_reduce(|| (), |_, _| Ok(()))
+}
+
+/// Batch validates a collection of message values, **all by the same author, ordered by ascending sequence
+/// number, with no missing messages**.
+///
+/// This will mainly useful during replication. Collect all the latest messages from a feed you're
+/// replicating and batch validate all the messages at once.
+pub fn par_validate_message_value_hash_chain_of_feed<T: AsRef<[u8]>, U: AsRef<[u8]>>(
+    messages: &[T],
+    previous: Option<U>,
+) -> Result<()>
+where
+    [T]: ParallelSlice<T>,
+    T: Sync,
+    U: Sync + Send + Copy,
+{
+    messages
+        .par_iter()
+        .enumerate()
+        .try_fold(
+            || (),
+            |_, (idx, msg)| {
+                if idx == 0 {
+                    let prev = match previous {
+                        Some(prev) => Some(prev.as_ref().to_owned()),
+                        _ => None,
+                    };
+                    validate_message_value_hash_chain(msg.as_ref(), prev)
+                } else {
+                    validate_message_value_hash_chain(msg.as_ref(), Some(messages[idx - 1].as_ref()))
                 }
             },
         )
@@ -118,73 +155,36 @@ where
 /// - the signature. See ssb-verify-signatures which lets you to batch verification of signatures.
 ///
 /// `previous_msg_bytes` will be `None` only when `message_bytes` is the first message by that author.
-pub fn validate_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
+pub fn validate_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     message_bytes: T,
     previous_msg_bytes: Option<U>,
 ) -> Result<()> {
     let message_bytes = message_bytes.as_ref();
     // msg seq is 1 larger than previous
-    let previous_message = match previous_msg_bytes {
-        Some(message) => Some(from_slice::<SsbMessage>(message.as_ref()).context(
-            InvalidPreviousMessage {
-                message: message.as_ref().to_owned(),
-            },
-        )?),
-        None => None,
+    let (previous_value, previous_key) = match previous_msg_bytes {
+        Some(message) => {
+            let previous =
+                from_slice::<SsbMessage>(message.as_ref()).context(InvalidPreviousMessage {
+                    message: message.as_ref().to_owned(),
+                })?;
+            (Some(previous.value), Some(previous.key))
+        }
+
+        None => (None, None),
     };
 
     let message = from_slice::<SsbMessage>(message_bytes).context(InvalidMessage {
         message: message_bytes.to_owned(),
     })?;
 
-    if let Some(previous) = previous_message {
-        // The authors are not allowed to change in a feed.
-        let previous_author = previous.value.author;
-        let author = message.value.author;
-        ensure!(
-            author == previous_author,
-            AuthorsDidNotMatch {
-                previous_author,
-                author
-            }
-        );
+    let message_value = message.value;
 
-        // The sequence must increase by one.
-        let expected_sequence = previous.value.sequence + 1;
-        ensure!(
-            message.value.sequence == expected_sequence,
-            InvalidSequenceNumber {
-                message: message_bytes.to_owned(),
-                actual: message.value.sequence,
-                expected: expected_sequence
-            }
-        );
-
-        // msg previous must match hash of previous.value otherwise it's a fork.
-        ensure!(
-            message.value.previous.context(PreviousWasNull)? == previous.key,
-            ForkedFeed {
-                previous_seq: previous.value.sequence
-            }
-        );
-    } else {
-        //This message is the first message.
-
-        //Seq must be 1
-        ensure!(
-            message.value.sequence == 1,
-            FirstMessageDidNotHaveSequenceOfOne {
-                message: message_bytes.to_owned()
-            }
-        );
-        //Previous must be None
-        ensure!(
-            message.value.previous.is_none(),
-            FirstMessageDidNotHavePreviousOfNull {
-                message: message_bytes.to_owned()
-            }
-        );
-    }
+    message_value_common_checks(
+        &message_value,
+        previous_value.as_ref(),
+        message_bytes,
+        previous_key.as_ref(),
+    )?;
 
     let verifiable_msg: Value = from_slice(message_bytes).context(InvalidMessage {
         message: message_bytes.to_owned(),
@@ -198,11 +198,9 @@ pub fn validate_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
 
     // Get the "value" from the message as bytes that we can hash.
     let value_bytes =
-        to_string(verifiable_msg_value, false).context(InvalidMessageCouldNotSerializeValue)?;
-    let value_bytes_latin = node_buffer_binary_serializer(&value_bytes);
-    let value_hash = Sha256::digest(value_bytes_latin.as_slice());
+        to_vec(verifiable_msg_value, false).context(InvalidMessageCouldNotSerializeValue)?;
 
-    let message_actual_multihash = Multihash::from_sha256(value_hash.into(), Target::Message);
+    let message_actual_multihash = multihash_from_bytes(&value_bytes);
 
     // The hash of the "value" must match the claimed value stored in the "key"
     ensure!(
@@ -214,6 +212,101 @@ pub fn validate_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
         }
     );
 
+    Ok(())
+}
+
+pub fn validate_message_value_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
+    message_bytes: T,
+    previous_msg_bytes: Option<U>,
+) -> Result<()> {
+    let message_bytes = message_bytes.as_ref();
+    // msg seq is 1 larger than previous
+    let (previous_value, previous_key) = match previous_msg_bytes {
+        Some(message) => {
+            let previous = from_slice::<SsbMessageValue>(message.as_ref()).context(
+                InvalidPreviousMessage {
+                    message: message.as_ref().to_owned(),
+                },
+            )?;
+            let previous_key = multihash_from_bytes(message.as_ref());
+            (Some(previous), Some(previous_key))
+        }
+        None => (None, None),
+    };
+
+    let message_value = from_slice::<SsbMessageValue>(message_bytes).context(InvalidMessage {
+        message: message_bytes.to_owned(),
+    })?;
+
+    message_value_common_checks(
+        &message_value,
+        previous_value.as_ref(),
+        message_bytes,
+        previous_key.as_ref(),
+    )?;
+
+    Ok(())
+}
+
+fn multihash_from_bytes(bytes: &[u8]) -> Multihash {
+    let value_bytes_latin = node_buffer_binary_serializer(std::str::from_utf8(bytes).unwrap());
+    let value_hash = Sha256::digest(value_bytes_latin.as_slice());
+    Multihash::from_sha256(value_hash.into(), Target::Message)
+}
+
+fn message_value_common_checks(
+    message_value: &SsbMessageValue,
+    previous_value: Option<&SsbMessageValue>,
+    message_bytes: &[u8],
+    previous_key: Option<&Multihash>,
+) -> Result<()> {
+    if let Some(previous_value) = previous_value {
+        // The authors are not allowed to change in a feed.
+        ensure!(
+            message_value.author == previous_value.author,
+            AuthorsDidNotMatch {
+                previous_author: previous_value.author.clone(),
+                author: message_value.author.clone()
+            }
+        );
+
+        // The sequence must increase by one.
+        let expected_sequence = previous_value.sequence + 1;
+        ensure!(
+            message_value.sequence == expected_sequence,
+            InvalidSequenceNumber {
+                message: message_bytes.to_owned(),
+                actual: message_value.sequence,
+                expected: expected_sequence
+            }
+        );
+
+        // msg previous must match hash of previous.value otherwise it's a fork.
+        ensure!(
+            message_value.previous.as_ref().context(PreviousWasNull)?
+                == previous_key.expect("expected the previous key to be Some(key), was None"),
+            ForkedFeed {
+                previous_seq: previous_value.sequence
+            }
+        );
+    } else {
+        //This message is the first message.
+
+        //Seq must be 1
+        ensure!(
+            message_value.sequence == 1,
+            FirstMessageDidNotHaveSequenceOfOne {
+                message: message_bytes.to_owned()
+            }
+        );
+        //Previous must be None
+        ensure!(
+            message_value.previous.is_none(),
+            FirstMessageDidNotHavePreviousOfNull {
+                message: message_bytes.to_owned()
+            }
+        );
+    };
     Ok(())
 }
 
@@ -231,34 +324,38 @@ fn node_buffer_binary_serializer(text: &str) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{par_validate_hash_chain_of_feed, validate_hash_chain, Error};
+    use crate::{par_validate_message_hash_chain_of_feed, validate_message_hash_chain, Error};
 
     #[test]
     fn it_works_first_message() {
-        assert!(validate_hash_chain::<_, &[u8]>(MESSAGE_1.as_bytes(), None).is_ok());
+        assert!(validate_message_hash_chain::<_, &[u8]>(MESSAGE_1.as_bytes(), None).is_ok());
     }
     #[test]
     fn it_works_second_message() {
-        assert!(validate_hash_chain(MESSAGE_2.as_bytes(), Some(MESSAGE_1.as_bytes())).is_ok());
+        assert!(
+            validate_message_hash_chain(MESSAGE_2.as_bytes(), Some(MESSAGE_1.as_bytes())).is_ok()
+        );
     }
 
     #[test]
-    fn par_validate_hash_chain_of_feed_first_messages_works() {
+    fn par_validate_message_hash_chain_of_feed_first_messages_works() {
         let messages = [MESSAGE_1.as_bytes(), MESSAGE_2.as_bytes()];
 
-        let result = par_validate_hash_chain_of_feed::<_, &[u8]>(&messages[..], None);
+        let result = par_validate_message_hash_chain_of_feed::<_, &[u8]>(&messages[..], None);
         assert!(result.is_ok());
     }
     #[test]
-    fn par_validate_hash_chain_of_feed_with_prev_works() {
+    fn par_validate_message_hash_chain_of_feed_with_prev_works() {
         let messages = [MESSAGE_2.as_bytes(), MESSAGE_3.as_bytes()];
 
-        let result = par_validate_hash_chain_of_feed(&messages[..], Some(MESSAGE_1.as_bytes()));
+        let result =
+            par_validate_message_hash_chain_of_feed(&messages[..], Some(MESSAGE_1.as_bytes()));
         assert!(result.is_ok());
     }
     #[test]
     fn first_message_must_have_previous_of_null() {
-        let result = validate_hash_chain::<_, &[u8]>(MESSAGE_1_INVALID_PREVIOUS.as_bytes(), None);
+        let result =
+            validate_message_hash_chain::<_, &[u8]>(MESSAGE_1_INVALID_PREVIOUS.as_bytes(), None);
         match result {
             Err(Error::FirstMessageDidNotHavePreviousOfNull { message: _ }) => {}
             _ => panic!(),
@@ -266,7 +363,8 @@ mod tests {
     }
     #[test]
     fn first_message_must_have_sequence_of_one() {
-        let result = validate_hash_chain::<_, &[u8]>(MESSAGE_1_INVALID_SEQ.as_bytes(), None);
+        let result =
+            validate_message_hash_chain::<_, &[u8]>(MESSAGE_1_INVALID_SEQ.as_bytes(), None);
         match result {
             Err(Error::FirstMessageDidNotHaveSequenceOfOne { message: _ }) => {}
             _ => panic!(),
@@ -274,7 +372,7 @@ mod tests {
     }
     #[test]
     fn it_detects_incorrect_seq() {
-        let result = validate_hash_chain(
+        let result = validate_message_hash_chain(
             MESSAGE_2_INCORRECT_SEQUENCE.as_bytes(),
             Some(MESSAGE_1.as_bytes()),
         );
@@ -292,7 +390,7 @@ mod tests {
     }
     #[test]
     fn it_detects_incorrect_author() {
-        let result = validate_hash_chain(
+        let result = validate_message_hash_chain(
             MESSAGE_2_INCORRECT_AUTHOR.as_bytes(),
             Some(MESSAGE_1.as_bytes()),
         );
@@ -306,7 +404,7 @@ mod tests {
     }
     #[test]
     fn it_detects_incorrect_previous_of_null() {
-        let result = validate_hash_chain(
+        let result = validate_message_hash_chain(
             MESSAGE_2_PREVIOUS_NULL.as_bytes(),
             Some(MESSAGE_1.as_bytes()),
         );
@@ -317,7 +415,7 @@ mod tests {
     }
     #[test]
     fn it_detects_incorrect_key() {
-        let result = validate_hash_chain(
+        let result = validate_message_hash_chain(
             MESSAGE_2_INCORRECT_KEY.as_bytes(),
             Some(MESSAGE_1.as_bytes()),
         );
@@ -332,7 +430,8 @@ mod tests {
     }
     #[test]
     fn it_detects_fork() {
-        let result = validate_hash_chain(MESSAGE_2_FORK.as_bytes(), Some(MESSAGE_1.as_bytes()));
+        let result =
+            validate_message_hash_chain(MESSAGE_2_FORK.as_bytes(), Some(MESSAGE_1.as_bytes()));
         match result {
             Err(Error::ForkedFeed { previous_seq: 1 }) => {}
             _ => panic!(),
@@ -341,7 +440,7 @@ mod tests {
 
     #[test]
     fn it_validates_a_message_with_unicode() {
-        let result = validate_hash_chain(
+        let result = validate_message_hash_chain(
             MESSAGE_WITH_UNICODE.as_bytes(),
             Some(MESSAGE_WITH_UNICODE_PREV.as_bytes()),
         );
