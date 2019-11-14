@@ -15,3 +15,11 @@ ssb-legacy-msg-data = { git="https://github.com/sunrise-choir/legacy-msg-data", 
 ssb-multiformats = {git="https://github.com/sunrise-choir/ssb-multiformats"}
 ssb-verify-signatures = {git = "https://github.com/sunrise-choir/ssb-verify-signatures"}
 rayon = "1.2.0"
+
+[dev-dependencies]
+criterion = "0.3"
+flumedb = { git = "https://github.com/sunrise-choir/flumedb-rs", version = "0.1.2" }
+
+[[bench]]
+name = "bench"
+harness = false
