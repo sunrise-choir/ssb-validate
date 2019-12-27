@@ -12,13 +12,13 @@ serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.8.0"
 snafu = "0.6.0"
 ssb-legacy-msg-data = { git="https://github.com/sunrise-choir/legacy-msg-data", version = "0.1.1" }
-ssb-multiformats = {git="https://github.com/sunrise-choir/ssb-multiformats"}
+ssb-multiformats = "0.1.0"
 ssb-verify-signatures = {git = "https://github.com/sunrise-choir/ssb-verify-signatures"}
 rayon = "1.2.0"
 
 [dev-dependencies]
 criterion = "0.3"
-flumedb = { git = "https://github.com/sunrise-choir/flumedb-rs", version = "0.1.2" }
+flumedb = "0.1.3"
 
 [[bench]]
 name = "bench"
