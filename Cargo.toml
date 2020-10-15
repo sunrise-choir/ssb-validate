@@ -1,19 +1,16 @@
 [package]
 name = "ssb-validate"
-version = "1.0.0"
+version = "1.0.1"
 authors = ["Piet Geursen <pietgeursen@gmail.com>"]
 edition = "2018"
 license = "AGPL-3.0"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.8.0"
 snafu = "0.6.0"
 ssb-legacy-msg-data = { git="https://github.com/sunrise-choir/legacy-msg-data", version = "0.1.1" }
-ssb-multiformats = {git="https://github.com/sunrise-choir/ssb-multiformats"}
-ssb-verify-signatures = {git = "https://github.com/sunrise-choir/ssb-verify-signatures"}
+ssb-multiformats = "0.4.0" 
 rayon = "1.2.0"
 
 [dev-dependencies]
