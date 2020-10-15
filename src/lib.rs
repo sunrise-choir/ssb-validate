@@ -23,7 +23,7 @@ use snafu::{ensure, OptionExt, ResultExt, Snafu};
 use ssb_legacy_msg_data::json::{from_slice, to_vec, DecodeJsonError, EncodeJsonError};
 use ssb_legacy_msg_data::value::Value;
 use ssb_legacy_msg_data::LegacyF64;
-use ssb_multiformats::multihash::{Multihash, Target};
+use ssb_multiformats::multihash::Multihash;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -489,7 +489,7 @@ pub fn validate_message_value_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
 fn multihash_from_bytes(bytes: &[u8]) -> Multihash {
     let value_bytes_latin = node_buffer_binary_serializer(std::str::from_utf8(bytes).unwrap());
     let value_hash = Sha256::digest(value_bytes_latin.as_slice());
-    Multihash::from_sha256(value_hash.into(), Target::Message)
+    Multihash::Message(value_hash.into())
 }
 
 fn message_value_common_checks(
