@@ -121,7 +121,7 @@ pub fn validate_ooo_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
             message_value.author == previous_value.author,
             AuthorsDidNotMatch {
                 previous_author: previous_value.author.clone(),
-                author: message_value.author.clone()
+                author: message_value.author
             }
         );
     }
@@ -161,7 +161,6 @@ pub fn validate_ooo_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
 ///
 /// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
 
-/*
 pub fn par_validate_ooo_message_hash_chain_of_feed<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     messages: &[T],
     previous: Option<U>,
@@ -171,9 +170,25 @@ where
     T: Sync,
     U: Sync + Send + Copy,
 {
-    // TODO
+    messages
+        .par_iter()
+        .enumerate()
+        .try_fold(
+            || (),
+            |_, (idx, msg)| {
+                if idx == 0 {
+                    let prev = match previous {
+                        Some(prev) => Some(prev.as_ref().to_owned()),
+                        _ => None,
+                    };
+                    validate_ooo_message_hash_chain(msg.as_ref(), prev)
+                } else {
+                    validate_ooo_message_hash_chain(msg.as_ref(), Some(messages[idx - 1].as_ref()))
+                }
+            },
+        )
+        .try_reduce(|| (), |_, _| Ok(()))
 }
-*/
 
 /// Batch validates a collection of messages, **all by the same author, ordered by ascending sequence
 /// number, with no missing messages**.
@@ -647,10 +662,18 @@ fn node_buffer_binary_serializer(text: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        par_validate_message_hash_chain_of_feed, validate_message_hash_chain,
-        validate_message_value_hash_chain, validate_ooo_message_hash_chain, Error,
+        par_validate_message_hash_chain_of_feed, par_validate_ooo_message_hash_chain_of_feed,
+        validate_message_hash_chain, validate_message_value_hash_chain,
+        validate_ooo_message_hash_chain, Error,
     };
-
+    // NEW TESTS BEGIN
+    #[test]
+    fn it_works_ooo_messages_without_first_message() {
+        assert!(
+            validate_ooo_message_hash_chain(MESSAGE_2.as_bytes(), Some(MESSAGE_3.as_bytes()))
+                .is_ok()
+        );
+    }
     #[test]
     fn it_works_ooo_messages() {
         assert!(
@@ -658,7 +681,30 @@ mod tests {
                 .is_ok()
         );
     }
+    #[test]
+    fn par_validate_ooo_message_hash_chain_of_feed_with_first_message_works() {
+        let messages = [MESSAGE_1.as_bytes(), MESSAGE_3.as_bytes()];
 
+        let result = par_validate_ooo_message_hash_chain_of_feed::<_, &[u8]>(&messages[..], None);
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn par_validate_ooo_message_hash_chain_of_feed_with_prev_works() {
+        let messages = [MESSAGE_3.as_bytes()];
+
+        let result =
+            par_validate_ooo_message_hash_chain_of_feed(&messages[..], Some(MESSAGE_1.as_bytes()));
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn par_validate_ooo_message_hash_chain_of_feed_without_first_message_works() {
+        let messages = [MESSAGE_3.as_bytes()];
+
+        let result =
+            par_validate_ooo_message_hash_chain_of_feed(&messages[..], Some(MESSAGE_2.as_bytes()));
+        assert!(result.is_ok());
+    }
+    // NEW TESTS END
     #[test]
     fn it_works_first_message() {
         assert!(validate_message_hash_chain::<_, &[u8]>(MESSAGE_1.as_bytes(), None).is_ok());
