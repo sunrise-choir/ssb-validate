@@ -91,6 +91,90 @@ struct SsbMessage {
     value: SsbMessageValue,
 }
 
+// only check a single message (no previous)
+pub fn validate_ooo_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
+    message_bytes: T,
+    previous_msg_bytes: Option<U>,
+) -> Result<()> {
+    let message_bytes = message_bytes.as_ref();
+
+    let (previous_value, _previous_key) = match previous_msg_bytes {
+        Some(message) => {
+            let previous =
+                from_slice::<SsbMessage>(message.as_ref()).context(InvalidPreviousMessage {
+                    message: message.as_ref().to_owned(),
+                })?;
+            (Some(previous.value), Some(previous.key))
+        }
+        None => (None, None),
+    };
+
+    let message = from_slice::<SsbMessage>(message_bytes).context(InvalidMessage {
+        message: message_bytes.to_owned(),
+    })?;
+
+    let message_value = message.value;
+
+    if let Some(previous_value) = previous_value.as_ref() {
+        // The authors are not allowed to change in a feed.
+        ensure!(
+            message_value.author == previous_value.author,
+            AuthorsDidNotMatch {
+                previous_author: previous_value.author.clone(),
+                author: message_value.author.clone()
+            }
+        );
+    }
+
+    let verifiable_msg: Value = from_slice(message_bytes).context(InvalidMessage {
+        message: message_bytes.to_owned(),
+    })?;
+
+    // Get the value from the message as this is what was hashed
+    let verifiable_msg_value = match verifiable_msg {
+        Value::Object(ref o) => o.get("value").context(InvalidMessageNoValue)?,
+        _ => panic!(),
+    };
+
+    // Get the "value" from the message as bytes that we can hash.
+    let value_bytes =
+        to_vec(verifiable_msg_value, false).context(InvalidMessageCouldNotSerializeValue)?;
+
+    let message_actual_multihash = multihash_from_bytes(&value_bytes);
+
+    // The hash of the "value" must match the claimed value stored in the "key"
+    ensure!(
+        message_actual_multihash == message.key,
+        ActualHashDidNotMatchKey {
+            message: message_bytes.to_owned(),
+            actual_hash: message_actual_multihash,
+            expected_hash: message.key,
+        }
+    );
+
+    Ok(())
+}
+
+/// Batch validates a collection of out-of-order messages by a single author. Missing
+/// messages are allowed and the collection is not expected to be ordered by ascending sequence
+/// number.
+///
+/// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
+
+/*
+pub fn par_validate_ooo_message_hash_chain_of_feed<T: AsRef<[u8]>, U: AsRef<[u8]>>(
+    messages: &[T],
+    previous: Option<U>,
+) -> Result<()>
+where
+    [T]: ParallelSlice<T>,
+    T: Sync,
+    U: Sync + Send + Copy,
+{
+    // TODO
+}
+*/
+
 /// Batch validates a collection of messages, **all by the same author, ordered by ascending sequence
 /// number, with no missing messages**.
 ///
@@ -564,8 +648,16 @@ fn node_buffer_binary_serializer(text: &str) -> Vec<u8> {
 mod tests {
     use crate::{
         par_validate_message_hash_chain_of_feed, validate_message_hash_chain,
-        validate_message_value_hash_chain, Error,
+        validate_message_value_hash_chain, validate_ooo_message_hash_chain, Error,
     };
+
+    #[test]
+    fn it_works_ooo_messages() {
+        assert!(
+            validate_ooo_message_hash_chain(MESSAGE_3.as_bytes(), Some(MESSAGE_1.as_bytes()))
+                .is_ok()
+        );
+    }
 
     #[test]
     fn it_works_first_message() {
