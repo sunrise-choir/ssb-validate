@@ -91,7 +91,22 @@ struct SsbMessage {
     value: SsbMessageValue,
 }
 
-// only check a single message (no previous)
+/// Check that an out-of-order message is valid.
+///
+/// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
+///
+/// This checks that:
+/// - the author has not changed
+/// - the _actual_ hash matches the hash claimed in `key`
+/// - the message contains the correct fields
+///
+/// This does not check:
+/// - the signature. See ssb-verify-signatures which lets you to batch verification of signatures.
+/// - the sequence increments by 1 compared to previous
+/// - the _actual_ hash of the previous message matches the hash claimed in `previous`
+///
+/// `previous_msg_bytes` will be `None` only when `message_bytes` is the first message by that author.
+
 pub fn validate_ooo_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     message_bytes: T,
     previous_msg_bytes: Option<U>,
@@ -155,7 +170,8 @@ pub fn validate_ooo_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     Ok(())
 }
 
-/// Batch validates a collection of out-of-order messages by a single author. Missing
+/// Batch validates a collection of out-of-order messages by a single author. Checks of previous
+/// message hash and ascending sequence number are not performed, meaning that missing
 /// messages are allowed and the collection is not expected to be ordered by ascending sequence
 /// number.
 ///
