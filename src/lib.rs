@@ -177,14 +177,10 @@ pub fn validate_ooo_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
 ///
 /// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
 
-pub fn par_validate_ooo_message_hash_chain_of_feed<T: AsRef<[u8]>, U: AsRef<[u8]>>(
-    messages: &[T],
-    previous: Option<U>,
-) -> Result<()>
+pub fn par_validate_ooo_message_hash_chain_of_feed<T: AsRef<[u8]>>(messages: &[T]) -> Result<()>
 where
     [T]: ParallelSlice<T>,
     T: Sync,
-    U: Sync + Send + Copy,
 {
     messages
         .par_iter()
@@ -193,11 +189,7 @@ where
             || (),
             |_, (idx, msg)| {
                 if idx == 0 {
-                    let prev = match previous {
-                        Some(prev) => Some(prev.as_ref().to_owned()),
-                        _ => None,
-                    };
-                    validate_ooo_message_hash_chain(msg.as_ref(), prev)
+                    validate_ooo_message_hash_chain::<_, &[u8]>(msg.as_ref(), None)
                 } else {
                     validate_ooo_message_hash_chain(msg.as_ref(), Some(messages[idx - 1].as_ref()))
                 }
