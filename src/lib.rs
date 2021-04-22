@@ -697,23 +697,14 @@ mod tests {
             MESSAGE_2.as_bytes(),
         ];
 
-        let result = par_validate_ooo_message_hash_chain_of_feed::<_, &[u8]>(&messages[..], None);
-        assert!(result.is_ok());
-    }
-    #[test]
-    fn par_validate_ooo_message_hash_chain_of_feed_with_prev_works() {
-        let messages = [MESSAGE_3.as_bytes()];
-
-        let result =
-            par_validate_ooo_message_hash_chain_of_feed(&messages[..], Some(MESSAGE_1.as_bytes()));
+        let result = par_validate_ooo_message_hash_chain_of_feed(&messages[..]);
         assert!(result.is_ok());
     }
     #[test]
     fn par_validate_ooo_message_hash_chain_of_feed_without_first_message_works() {
-        let messages = [MESSAGE_3.as_bytes()];
+        let messages = [MESSAGE_3.as_bytes(), MESSAGE_2.as_bytes()];
 
-        let result =
-            par_validate_ooo_message_hash_chain_of_feed(&messages[..], Some(MESSAGE_2.as_bytes()));
+        let result = par_validate_ooo_message_hash_chain_of_feed(&messages[..]);
         assert!(result.is_ok());
     }
     // NEW TESTS END
