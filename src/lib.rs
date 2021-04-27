@@ -85,7 +85,6 @@ struct SsbMessageValue {
     sequence: u64,
     timestamp: LegacyF64,
     hash: String,
-    content: Value,
     signature: String,
 }
 
