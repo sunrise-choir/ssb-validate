@@ -87,6 +87,7 @@ struct SsbMessageValue {
     sequence: u64,
     timestamp: LegacyF64,
     hash: String,
+    content: Value,
     signature: String,
 }
 
@@ -1175,7 +1176,7 @@ mod tests {
   "timestamp": 1571140555382.002
 }"##;
 
-const MESSAGE_WITHOUT_HASH_FUNCTION: &str = r##"{
+    const MESSAGE_WITHOUT_HASH_FUNCTION: &str = r##"{
   "key": "%8Y0PR6EAoyObJhJZf2YQNn5B3RaCDzsrVrj2XxgRPhE=.sha256",
   "value": {
     "previous": null,
@@ -1206,7 +1207,7 @@ const MESSAGE_WITHOUT_HASH_FUNCTION: &str = r##"{
   "timestamp": 1571140555382.002
 }"##;
 
-const MESSAGE_WITH_EXTRA_FIELD: &str = r##"{
+    const MESSAGE_WITH_EXTRA_FIELD: &str = r##"{
   "key": "%aR6KXa2nhQicxWGOv3ECWjUeysve/0p1HTAGmnt7u2w=.sha256",
   "value": {
     "previous": null,
