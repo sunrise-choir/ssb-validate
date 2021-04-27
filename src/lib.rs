@@ -80,12 +80,14 @@ pub enum Error {
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 struct SsbMessageValue {
     previous: Option<Multihash>,
     author: String,
     sequence: u64,
     timestamp: LegacyF64,
     hash: String,
+    signature: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -834,6 +836,19 @@ mod tests {
         }
     }
     #[test]
+    fn it_detects_extra_unwanted_field() {
+        let result =
+            validate_message_hash_chain::<_, &[u8]>(MESSAGE_WITH_EXTRA_FIELD.as_bytes(), None);
+        // code: Message("unknown field `extra`, expected one of ...
+        match result {
+            Err(Error::InvalidMessage {
+                source: _,
+                message: _,
+            }) => {}
+            _ => panic!(),
+        }
+    }
+    #[test]
     fn it_detects_fork() {
         let result =
             validate_message_hash_chain(MESSAGE_2_FORK.as_bytes(), Some(MESSAGE_1.as_bytes()));
@@ -1160,7 +1175,7 @@ mod tests {
   "timestamp": 1571140555382.002
 }"##;
 
-    const MESSAGE_WITHOUT_HASH_FUNCTION: &str = r##"{
+const MESSAGE_WITHOUT_HASH_FUNCTION: &str = r##"{
   "key": "%8Y0PR6EAoyObJhJZf2YQNn5B3RaCDzsrVrj2XxgRPhE=.sha256",
   "value": {
     "previous": null,
@@ -1188,6 +1203,23 @@ mod tests {
     },
     "signature": "9OAbsQs2qhSLhjKH6DRoJepk/pMLnyFux87Xm+Oz4otTwocYdKeXZuHMj+6tzZJ7jzYpqNmh8sQ/vTtRCUFZCg==.sig.ed25519"
   },
+  "timestamp": 1571140555382.002
+}"##;
+
+const MESSAGE_WITH_EXTRA_FIELD: &str = r##"{
+  "key": "%aR6KXa2nhQicxWGOv3ECWjUeysve/0p1HTAGmnt7u2w=.sha256",
+  "value": {
+    "previous": null,
+    "author": "@AzvddyStfk/T95/3VuHxuJRwqqpBkCyoW7qHRCui2N4=.ed25519",
+    "sequence": 1,
+    "timestamp": 1491901740000,
+    "hash": "sha256",
+    "content": {
+      "type": "invalid"
+    },
+    "signature": "tECMcZunn58MckGfUBL0GTqiy7Svfqs2Z+vgqxmdz5i5cjHg/WR4Glj1HX4B0ioSa+HeDyOBVG5s2HhXEEtUCQ==.sig.ed25519",
+    "extra": "INVALID"
+    },
   "timestamp": 1571140555382.002
 }"##;
 }
