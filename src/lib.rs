@@ -50,6 +50,8 @@ pub enum Error {
     FirstMessageDidNotHaveSequenceOfOne { message: Vec<u8> },
     #[snafu(display("The first message of a feed must have previous of null",))]
     FirstMessageDidNotHavePreviousOfNull { message: Vec<u8> },
+    #[snafu(display("The message hash must be 'sha256'",))]
+    InvalidHashFunction { message: Vec<u8> },
     #[snafu(display("The sequence must increase by one",))]
     InvalidSequenceNumber {
         message: Vec<u8>,
@@ -83,6 +85,7 @@ struct SsbMessageValue {
     author: String,
     sequence: u64,
     timestamp: LegacyF64,
+    hash: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -605,6 +608,14 @@ fn message_value_common_checks(
     message_bytes: &[u8],
     previous_key: Option<&Multihash>,
 ) -> Result<()> {
+    // The hash signature must be `sha256`.
+    ensure!(
+        message_value.hash == "sha256",
+        InvalidHashFunction {
+            message: message_bytes.to_owned()
+        }
+    );
+
     if let Some(previous_value) = previous_value {
         // The authors are not allowed to change in a feed.
         ensure!(
@@ -674,7 +685,6 @@ mod tests {
         validate_message_hash_chain, validate_message_value_hash_chain,
         validate_ooo_message_hash_chain, Error,
     };
-    // NEW TESTS BEGIN
     #[test]
     fn it_works_ooo_messages_without_first_message() {
         assert!(
@@ -707,7 +717,6 @@ mod tests {
         let result = par_validate_ooo_message_hash_chain_of_feed(&messages[..]);
         assert!(result.is_ok());
     }
-    // NEW TESTS END
     #[test]
     fn it_works_first_message() {
         assert!(validate_message_hash_chain::<_, &[u8]>(MESSAGE_1.as_bytes(), None).is_ok());
@@ -833,7 +842,29 @@ mod tests {
             _ => panic!(),
         }
     }
-
+    #[test]
+    fn it_detects_missing_hash_function() {
+        let result =
+            validate_message_hash_chain::<_, &[u8]>(MESSAGE_WITHOUT_HASH_FUNCTION.as_bytes(), None);
+        match result {
+            Err(Error::InvalidMessage {
+                source: _,
+                message: _,
+            }) => {}
+            _ => panic!(),
+        }
+    }
+    #[test]
+    fn it_detects_incorrect_hash_function() {
+        let result = validate_message_hash_chain::<_, &[u8]>(
+            MESSAGE_WITH_INVALID_HASH_FUNCTION.as_bytes(),
+            None,
+        );
+        match result {
+            Err(Error::InvalidHashFunction { message: _ }) => {}
+            _ => panic!(),
+        }
+    }
     #[test]
     fn it_validates_a_message_with_unicode() {
         let result = validate_message_hash_chain(
@@ -1125,6 +1156,37 @@ mod tests {
       ]
     },
     "signature": "9Dh6hj/gdrruYNh/rkELEJrk0+quhQF1VfU7veJ8Yb/cDUHzaQWue2YljRuERThlyd+92cOfA4PujfNC2VbTDA==.sig.ed25519"
+  },
+  "timestamp": 1571140555382.002
+}"##;
+
+    const MESSAGE_WITHOUT_HASH_FUNCTION: &str = r##"{
+  "key": "%8Y0PR6EAoyObJhJZf2YQNn5B3RaCDzsrVrj2XxgRPhE=.sha256",
+  "value": {
+    "previous": null,
+    "author": "@AzvddyStfk/T95/3VuHxuJRwqqpBkCyoW7qHRCui2N4=.ed25519",
+    "sequence": 1,
+    "timestamp": 1491901740000,
+    "content": {
+      "type": "invalid"
+    },
+    "signature": "sI9Nhe0HRC/W0q1DrgB4t0gkuBXLdgU6JMwZS59d6ZAitbF12H+6u9vXnE7ssikw4B4v+D0IvCSB2jRhXDICBw==.sig.ed25519"
+    },
+    "timestamp": 1571140555382.002
+}"##;
+
+    const MESSAGE_WITH_INVALID_HASH_FUNCTION: &str = r##"{
+  "key": "%nAzZR0XlsCzr1yb/jrSOAKGEol0cST0XMB3LYfPJheA=.sha256",
+  "value": {
+    "previous": null,
+    "author": "@AzvddyStfk/T95/3VuHxuJRwqqpBkCyoW7qHRCui2N4=.ed25519",
+    "sequence": 1,
+    "timestamp": 1491901740000,
+    "hash": "oanteuhnoatehuneotuh",
+    "content": {
+      "type": "invalid"
+    },
+    "signature": "9OAbsQs2qhSLhjKH6DRoJepk/pMLnyFux87Xm+Oz4otTwocYdKeXZuHMj+6tzZJ7jzYpqNmh8sQ/vTtRCUFZCg==.sig.ed25519"
   },
   "timestamp": 1571140555382.002
 }"##;
