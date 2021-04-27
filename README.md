@@ -16,6 +16,7 @@ To be valid, a message should satisfy the following criteria:
    - unless it is the first message in feed, in which case previous must be null
  - include a sequence number which is 1 larger than the sequence number of the previous message
    - unless it is the first message in a feed, in which case the sequence number must be 1 and the sequence number of the previous message must be null
+ - include a hash function field with value `sha256`
  - the author must not change compared to the previous message
  - if the message includes a key, it must be the hash of the value of the message
 
