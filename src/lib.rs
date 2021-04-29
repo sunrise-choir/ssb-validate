@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
 use ssb_legacy_msg_data::json::{from_slice, to_vec, DecodeJsonError, EncodeJsonError};
-use ssb_legacy_msg_data::value::Value;
+use ssb_legacy_msg_data::value::{ContentValue, Value};
 use ssb_legacy_msg_data::LegacyF64;
 use ssb_multiformats::multihash::Multihash;
 
@@ -87,7 +87,7 @@ struct SsbMessageValue {
     sequence: u64,
     timestamp: LegacyF64,
     hash: String,
-    content: Value,
+    content: ContentValue,
     signature: String,
 }
 
