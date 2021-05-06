@@ -56,6 +56,8 @@ pub enum Error {
     FirstMessageDidNotHavePreviousOfNull { message: Vec<u8> },
     #[snafu(display("The message hash must be 'sha256'",))]
     InvalidHashFunction { message: Vec<u8> },
+    #[snafu(display("The message content string must be canonical base64",))]
+    InvalidBase64 { message: Vec<u8> },
     #[snafu(display("The sequence must increase by one",))]
     InvalidSequenceNumber {
         message: Vec<u8>,
@@ -654,6 +656,19 @@ fn message_value_common_checks(
         }
     );
 
+    // The message `content` string must be canonical base64.
+    if let Value::String(private_msg) = &message_value.content.0 {
+        // Regex pattern to match on canonical base64 for private messages.
+        // Implemented according to the `is-canonical-base64` JS module by dominictarr.
+        let re = Regex::new(r"^(?:[a-zA-Z0-9/+]{4})*(?:[a-zA-Z0-9/+](?:(?:[AQgw]==)|(?:[a-zA-Z0-9/+][AEIMQUYcgkosw048]=)))?.box.*$").unwrap();
+        ensure!(
+            re.is_match(private_msg),
+            InvalidBase64 {
+                message: message_bytes,
+            }
+        );
+    }
+
     if let Some(previous_value) = previous_value {
         // The authors are not allowed to change in a feed.
         ensure!(
@@ -933,6 +948,26 @@ mod tests {
         );
         match result {
             Err(Error::InvalidMessageValueOrder { message: _ }) => {}
+            _ => panic!(),
+        }
+    }
+    #[test]
+    fn it_validates_a_private_message() {
+        let result = validate_message_hash_chain(
+            MESSAGE_PRIVATE.as_bytes(),
+            Some(MESSAGE_PRIVATE_PREV.as_bytes()),
+        );
+
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn it_detects_invalid_base64_for_private_message() {
+        let result = validate_message_hash_chain(
+            MESSAGE_PRIVATE_INVALID.as_bytes(),
+            Some(MESSAGE_PRIVATE_PREV.as_bytes()),
+        );
+        match result {
+            Err(Error::InvalidBase64 { message: _ }) => {}
             _ => panic!(),
         }
     }
@@ -1292,5 +1327,54 @@ mod tests {
     "extra": "INVALID"
     },
   "timestamp": 1571140555382.002
+}"##;
+
+    const MESSAGE_PRIVATE: &str = r##"{
+  "key": "%uN9G3nZ+IYrCiC8Qmqb8J8hnefc486pZGeWyqBomAi8=.sha256",
+  "value": {
+    "previous": "%Z694dkKDUmNtoSwwjLG9cl7j0Dd26EDp0DRDmyPl1Lc=.sha256",
+    "sequence": 24148,
+    "author": "@iL6NzQoOLFP18pCpprkbY80DMtiG4JFFtVSVUaoGsOQ=.ed25519",
+    "timestamp": 1620171292121,
+    "hash": "sha256",
+    "content": "siZEm1zFx1icq0SrEynGDpNRmJCXMxTB3iEteXFn+IhJH8WhMbT8tp9qOIaFkIYcdOyerSon6RK0l4RE1ZdDh/3lcGZSdP0Ljq59qsdqlf2ngwbIbV9AWdPRrPsoVZBV6RhI+YcVTloWWP5aauu1hZKjcm62ezLBTQ3EmFPYtDuwsOFkx9/7FP97ljhj67CwvlGzuiWp6FNICHbt5kOCxs9H0k6Tr8JJVdaJtJ2pqkX4p0ECMuEuYxCYbh3FpncCqlNZJXb0dj3iSsfsMNWTJLDqfkqJKH1jBVfxDL6+xAXBDS+E4F2hD4y9gRDZEej99uVBQWlbxr5eCRV+VbfBGYxwoAYtqux6rg3jBabImKKinBwHShEP5F/+wlb9IxQn4swyOgyv+UKx/jbx+91Ayso5bnNPZMpwRRX5p5DbpK1BnryeVJhktMgFqgni1g0lHyU8sQ2QzwZgXGw7dfYoamkqK4D24NOLnUoHuVuhd7Q5SxZWSAO6wpDa4nrODePoJdl328pbMwCoQlUNeHINmKxh/o/oCNbgXitn4oN3kSVEg/umdgwwI94gmZUjiYwP1v7HA7dI.box",
+    "signature": "n4Wepa4fxq+xLlmfCxwiC489rMZlnnrBFOkWMuGAv80O7GK0XZUn1zfuCP9fQBab1+P0m1g+OLiyWwqHnwdTBw==.sig.ed25519"
+    },
+  "timestamp": 1620198134771
+}"##;
+
+    const MESSAGE_PRIVATE_PREV: &str = r##"{
+  "key": "%Z694dkKDUmNtoSwwjLG9cl7j0Dd26EDp0DRDmyPl1Lc=.sha256",
+  "value": {
+    "previous": "%cN1F3DkKC3bfxZlwWY98xqzsoQGEC9sRNe9HYm6khhk=.sha256",
+    "sequence": 24147,
+    "author": "@iL6NzQoOLFP18pCpprkbY80DMtiG4JFFtVSVUaoGsOQ=.ed25519",
+    "timestamp": 1620136240655,
+    "hash": "sha256",
+    "content": {
+      "type": "vote",
+      "vote": {
+        "link": "%SXw+GJZZBvS7neNDfuyu2UXmGD3Gl8jMxX2PPc7sjCs=.sha256",
+        "value": 1,
+        "expression": "Like"
+      }
+    },
+    "signature": "iA958Ct3+9Z3tZZcbXvF4BAFVPJZ8MhfqnWOgzwhLdviL1KE3xTKn4joJl1a+mnqSLHbH/QT3NHQu378GdsHBg==.sig.ed25519"
+    },
+  "timestamp": 1620137278131.001
+}"##;
+
+    const MESSAGE_PRIVATE_INVALID: &str = r##"{
+  "key": "%uN9G3nZ+IYrCiC8Qmqb8J8hnefc486pZGeWyqBomAi8=.sha256",
+  "value": {
+    "previous": "%Z694dkKDUmNtoSwwjLG9cl7j0Dd26EDp0DRDmyPl1Lc=.sha256",
+    "sequence": 24148,
+    "author": "@iL6NzQoOLFP18pCpprkbY80DMtiG4JFFtVSVUaoGsOQ=.ed25519",
+    "timestamp": 1620171292121,
+    "hash": "sha256",
+    "content": "==siZEm1zFx1icq0SrEynGDpNRmJCXMxTB3iEteXFn+IhJH8WhMbT8tp9qOIaFkIYcdOyerSon6RK0l4RE1ZdDh/3lcGZSdP0Ljq59qsdqlf2ngwbIbV9AWdPRrPsoVZBV6RhI+YcVTloWWP5aauu1hZKjcm62ezLBTQ3EmFPYtDuwsOFkx9/7FP97ljhj67CwvlGzuiWp6FNICHbt5kOCxs9H0k6Tr8JJVdaJtJ2pqkX4p0ECMuEuYxCYbh3FpncCqlNZJXb0dj3iSsfsMNWTJLDqfkqJKH1jBVfxDL6+xAXBDS+E4F2hD4y9gRDZEej99uVBQWlbxr5eCRV+VbfBGYxwoAYtqux6rg3jBabImKKinBwHShEP5F/+wlb9IxQn4swyOgyv+UKx/jbx+91Ayso5bnNPZMpwRRX5p5DbpK1BnryeVJhktMgFqgni1g0lHyU8sQ2QzwZgXGw7dfYoamkqK4D24NOLnUoHuVuhd7Q5SxZWSAO6wpDa4nrODePoJdl328pbMwCoQlUNeHINmKxh/o/oCNbgXitn4oN3kSVEg/umdgwwI94gmZUjiYwP1v7HA7dI.box",
+    "signature": "n4Wepa4fxq+xLlmfCxwiC489rMZlnnrBFOkWMuGAv80O7GK0XZUn1zfuCP9fQBab1+P0m1g+OLiyWwqHnwdTBw==.sig.ed25519"
+    },
+  "timestamp": 1620198134771
 }"##;
 }
