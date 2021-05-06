@@ -159,6 +159,16 @@ pub fn validate_ooo_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
         }
     );
 
+    // The message `content` string must be canonical base64.
+    if let Value::String(private_msg) = &message_value.content.0 {
+        ensure!(
+            is_canonical_base64(private_msg),
+            InvalidBase64 {
+                message: message_bytes,
+            }
+        );
+    }
+
     if let Some(previous_value) = previous_value.as_ref() {
         // The authors are not allowed to change in a feed.
         ensure!(
@@ -758,6 +768,21 @@ mod tests {
             validate_ooo_message_hash_chain(MESSAGE_3.as_bytes(), Some(MESSAGE_1.as_bytes()))
                 .is_ok()
         );
+    }
+    #[test]
+    fn it_validates_a_private_message_ooo() {
+        let result = validate_ooo_message_hash_chain::<_, &[u8]>(MESSAGE_PRIVATE.as_bytes(), None);
+
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn it_detects_invalid_base64_for_private_message_ooo() {
+        let result =
+            validate_ooo_message_hash_chain::<_, &[u8]>(MESSAGE_PRIVATE_INVALID.as_bytes(), None);
+        match result {
+            Err(Error::InvalidBase64 { message: _ }) => {}
+            _ => panic!(),
+        }
     }
     #[test]
     fn par_validate_ooo_message_hash_chain_of_feed_with_first_message_works() {
