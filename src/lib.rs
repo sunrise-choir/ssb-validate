@@ -16,8 +16,9 @@
 //!
 //! Benchmarking on Android on a [One Plus 5T](https://en.wikipedia.org/wiki/OnePlus_5T) (8 core arm64) shows that batch processing is ~3.3 times faster.
 //!
+use lazy_static::lazy_static;
 use rayon::prelude::*;
-use regex::Regex;
+use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
@@ -38,6 +39,8 @@ pub enum Error {
         source: DecodeJsonError,
         message: Vec<u8>,
     },
+    #[snafu(display("Message must have keys in correct order",))]
+    InvalidMessageValueOrder { message: Vec<u8> },
     #[snafu(display(
         "Message was invalid. The authors did not match. \nAuthor of previous: {}\n Author: {} ",
         previous_author,
@@ -138,6 +141,22 @@ pub fn validate_ooo_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     })?;
 
     let message_value = message.value;
+
+    // The message value fields are in the correct order.
+    ensure!(
+        is_correct_order(message_bytes),
+        InvalidMessageValueOrder {
+            message: message_bytes.to_owned()
+        }
+    );
+
+    // The hash signature must be `sha256`.
+    ensure!(
+        message_value.hash == "sha256",
+        InvalidHashFunction {
+            message: message_bytes.to_owned()
+        }
+    );
 
     if let Some(previous_value) = previous_value.as_ref() {
         // The authors are not allowed to change in a feed.
@@ -608,12 +627,27 @@ fn multihash_from_bytes(bytes: &[u8]) -> Multihash {
     Multihash::Message(value_hash.into())
 }
 
+fn is_correct_order(bytes: &[u8]) -> bool {
+    lazy_static! {
+        static ref RE: Regex = Regex::new(r#""previous"[\s\S]*("author"|"sequence")[\s\S]*("author"|"sequence")[\s\S]*"timestamp"[\s\S]*"hash"[\s\S]*"content"[\s\S]*"signature""#).unwrap();
+    }
+    RE.is_match(bytes)
+}
+
 fn message_value_common_checks(
     message_value: &SsbMessageValue,
     previous_value: Option<&SsbMessageValue>,
     message_bytes: &[u8],
     previous_key: Option<&Multihash>,
 ) -> Result<()> {
+    // The message value fields are in the correct order.
+    ensure!(
+        is_correct_order(message_bytes),
+        InvalidMessageValueOrder {
+            message: message_bytes.to_owned()
+        }
+    );
+
     // The hash signature must be `sha256`.
     ensure!(
         message_value.hash == "sha256",
@@ -907,6 +941,17 @@ mod tests {
         assert!(result.is_ok());
     }
     #[test]
+    fn it_detects_incorrect_message_value_order() {
+        let result = validate_message_hash_chain(
+            MESSAGE_2_INVALID_ORDER.as_bytes(),
+            Some(MESSAGE_1.as_bytes()),
+        );
+        match result {
+            Err(Error::InvalidMessageValueOrder { message: _ }) => {}
+            _ => panic!(),
+        }
+    }
+    #[test]
     fn it_validates_a_private_message() {
         let result = validate_message_hash_chain(
             MESSAGE_PRIVATE.as_bytes(),
@@ -921,7 +966,6 @@ mod tests {
             MESSAGE_PRIVATE_INVALID.as_bytes(),
             Some(MESSAGE_PRIVATE_PREV.as_bytes()),
         );
-
         match result {
             Err(Error::InvalidBase64 { message: _ }) => {}
             _ => panic!(),
@@ -1001,6 +1045,30 @@ mod tests {
     "sequence": 2,
     "timestamp": 1470187292812,
     "hash": "sha256",
+    "content": {
+      "type": "about",
+      "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+      "image": {
+        "link": "&MxwsfZoq7X6oqnEX/TWIlAqd6S+jsUA6T1hqZYdl7RM=.sha256",
+        "size": 642763,
+        "type": "image/png",
+        "width": 512,
+        "height": 512
+      }
+    },
+    "signature": "j3C7Us3JDnSUseF4ycRB0dTMs0xC6NAriAFtJWvx2uyz0K4zSj6XL8YA4BVqv+AHgo08+HxXGrpJlZ3ADwNnDw==.sig.ed25519"
+  },
+  "timestamp": 1571140551485
+}"##;
+
+    const MESSAGE_2_INVALID_ORDER: &str = r##"{
+  "key": "%kLWDux4wCG+OdQWAHnpBGzGlCehqMLfgLbzlKCvgesU=.sha256",
+  "value": {
+    "previous": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
+    "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+    "sequence": 2,
+    "hash": "sha256",
+    "timestamp": 1470187292812,
     "content": {
       "type": "about",
       "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
