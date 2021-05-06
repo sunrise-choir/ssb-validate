@@ -18,7 +18,8 @@
 //!
 use lazy_static::lazy_static;
 use rayon::prelude::*;
-use regex::bytes::Regex;
+use regex::bytes::Regex as RegexBytes;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
@@ -629,7 +630,7 @@ fn multihash_from_bytes(bytes: &[u8]) -> Multihash {
 
 fn is_correct_order(bytes: &[u8]) -> bool {
     lazy_static! {
-        static ref RE: Regex = Regex::new(r#""previous"[\s\S]*("author"|"sequence")[\s\S]*("author"|"sequence")[\s\S]*"timestamp"[\s\S]*"hash"[\s\S]*"content"[\s\S]*"signature""#).unwrap();
+        static ref RE: RegexBytes = RegexBytes::new(r#""previous"[\s\S]*("author"|"sequence")[\s\S]*("author"|"sequence")[\s\S]*"timestamp"[\s\S]*"hash"[\s\S]*"content"[\s\S]*"signature""#).unwrap();
     }
     RE.is_match(bytes)
 }
