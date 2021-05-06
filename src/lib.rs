@@ -630,9 +630,18 @@ fn multihash_from_bytes(bytes: &[u8]) -> Multihash {
 
 fn is_correct_order(bytes: &[u8]) -> bool {
     lazy_static! {
-        static ref RE: RegexBytes = RegexBytes::new(r#""previous"[\s\S]*("author"|"sequence")[\s\S]*("author"|"sequence")[\s\S]*"timestamp"[\s\S]*"hash"[\s\S]*"content"[\s\S]*"signature""#).unwrap();
+        static ref RE_B: RegexBytes = RegexBytes::new(r#""previous"[\s\S]*("author"|"sequence")[\s\S]*("author"|"sequence")[\s\S]*"timestamp"[\s\S]*"hash"[\s\S]*"content"[\s\S]*"signature""#).unwrap();
     }
-    RE.is_match(bytes)
+    RE_B.is_match(bytes)
+}
+
+fn is_canonical_base64(private_msg: &str) -> bool {
+    lazy_static! {
+        // Regex pattern to match on canonical base64 for private messages.
+        // Implemented according to the `is-canonical-base64` JS module by dominictarr.
+        static ref RE: Regex = Regex::new(r"^(?:[a-zA-Z0-9/+]{4})*(?:[a-zA-Z0-9/+](?:(?:[AQgw]==)|(?:[a-zA-Z0-9/+][AEIMQUYcgkosw048]=)))?.box.*$").unwrap();
+    }
+    RE.is_match(private_msg)
 }
 
 fn message_value_common_checks(
@@ -659,11 +668,8 @@ fn message_value_common_checks(
 
     // The message `content` string must be canonical base64.
     if let Value::String(private_msg) = &message_value.content.0 {
-        // Regex pattern to match on canonical base64 for private messages.
-        // Implemented according to the `is-canonical-base64` JS module by dominictarr.
-        let re = Regex::new(r"^(?:[a-zA-Z0-9/+]{4})*(?:[a-zA-Z0-9/+](?:(?:[AQgw]==)|(?:[a-zA-Z0-9/+][AEIMQUYcgkosw048]=)))?.box.*$").unwrap();
         ensure!(
-            re.is_match(private_msg),
+            is_canonical_base64(private_msg),
             InvalidBase64 {
                 message: message_bytes,
             }
