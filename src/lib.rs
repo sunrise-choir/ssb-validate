@@ -140,6 +140,22 @@ pub fn validate_ooo_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
 
     let message_value = message.value;
 
+    // The message value fields are in the correct order.
+    ensure!(
+        is_correct_order(message_bytes),
+        InvalidMessageValueOrder {
+            message: message_bytes.to_owned()
+        }
+    );
+
+    // The hash signature must be `sha256`.
+    ensure!(
+        message_value.hash == "sha256",
+        InvalidHashFunction {
+            message: message_bytes.to_owned()
+        }
+    );
+
     if let Some(previous_value) = previous_value.as_ref() {
         // The authors are not allowed to change in a feed.
         ensure!(
