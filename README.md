@@ -19,6 +19,7 @@ To be valid, a message should satisfy the following criteria:
  - include a hash function field with value `sha256`
  - the author must not change compared to the previous message
  - if the message includes a key, it must be the hash of the value of the message
+ - message value keys must be in the order: "previous", "author"|"sequence", "author"|"sequence", "timestamp", "hash", "content", "signature"
 
 You can check messages one by one or batch process a collection of them (uses [rayon](https://docs.rs/rayon/1.2.0/rayon/index.html) internally)
 
