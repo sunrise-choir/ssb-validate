@@ -104,6 +104,89 @@ struct SsbMessage {
     value: SsbMessageValue,
 }
 
+/// Check that an out-of-order message is valid without checking the author.
+///
+/// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
+///
+/// This checks that:
+/// - the _actual_ hash matches the hash claimed in `key`
+/// - the message contains the correct fields
+/// - the message value fields are in the correct order
+/// - there are no unexpected top-level fields in the message
+/// - the hash signature is defined as `sha256`
+/// - the message `content` string is canonical base64
+///
+/// This does not check:
+/// - the signature (see ssb-verify-signatures which lets you to batch verification of signatures)
+/// - the previous message
+///   - no check of the sequence to ensure it increments by 1 compared to previous
+///   - no check that the _actual_ hash of the previous message matches the hash claimed in `previous`
+///   - no check that the author has not changed
+
+pub fn validate_multi_author_message_hash_chain<T: AsRef<[u8]>>(message_bytes: T) -> Result<()> {
+    let message_bytes = message_bytes.as_ref();
+
+    let message = from_slice::<SsbMessage>(message_bytes).context(InvalidMessage {
+        message: message_bytes.to_owned(),
+    })?;
+
+    let message_value = message.value;
+
+    message_value_common_checks(&message_value, None, message_bytes, None, false)?;
+
+    let verifiable_msg: Value = from_slice(message_bytes).context(InvalidMessage {
+        message: message_bytes.to_owned(),
+    })?;
+
+    // Get the value from the message as this is what was hashed
+    let verifiable_msg_value = match verifiable_msg {
+        Value::Object(ref o) => o.get("value").context(InvalidMessageNoValue)?,
+        _ => panic!(),
+    };
+
+    // Get the "value" from the message as bytes that we can hash.
+    let value_bytes =
+        to_vec(verifiable_msg_value, false).context(InvalidMessageCouldNotSerializeValue)?;
+
+    let message_actual_multihash = multihash_from_bytes(&value_bytes);
+
+    // The hash of the "value" must match the claimed value stored in the "key"
+    ensure!(
+        message_actual_multihash == message.key,
+        ActualHashDidNotMatchKey {
+            message: message_bytes.to_owned(),
+            actual_hash: message_actual_multihash,
+            expected_hash: message.key,
+        }
+    );
+
+    Ok(())
+}
+
+/// Batch validates a collection of out-of-order messages by multiple authors. No previous message
+/// checks are performed, meaning that missing messages are allowed, the collection is not expected
+/// to be ordered by ascending sequence number and the author is not expected to match between
+/// current and previous message.
+///
+/// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
+
+pub fn par_validate_multi_author_message_hash_chain_of_feed<T: AsRef<[u8]>>(
+    messages: &[T],
+) -> Result<()>
+where
+    [T]: ParallelSlice<T>,
+    T: Sync,
+{
+    messages
+        .par_iter()
+        .enumerate()
+        .try_fold(
+            || (),
+            |_, (_idx, msg)| validate_multi_author_message_hash_chain(msg.as_ref()),
+        )
+        .try_reduce(|| (), |_, _| Ok(()))
+}
+
 /// Check that an out-of-order message is valid.
 ///
 /// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
@@ -729,10 +812,16 @@ fn node_buffer_binary_serializer(text: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        par_validate_message_hash_chain_of_feed, par_validate_ooo_message_hash_chain_of_feed,
-        validate_message_hash_chain, validate_message_value_hash_chain,
+        par_validate_message_hash_chain_of_feed,
+        par_validate_multi_author_message_hash_chain_of_feed,
+        par_validate_ooo_message_hash_chain_of_feed, validate_message_hash_chain,
+        validate_message_value_hash_chain, validate_multi_author_message_hash_chain,
         validate_ooo_message_hash_chain, Error,
     };
+    #[test]
+    fn it_works_multi_author() {
+        assert!(validate_multi_author_message_hash_chain(MESSAGE_2.as_bytes()).is_ok());
+    }
     #[test]
     fn it_works_ooo_messages_without_first_message() {
         assert!(
@@ -761,6 +850,17 @@ mod tests {
             Err(Error::InvalidBase64 { message: _ }) => {}
             _ => panic!(),
         }
+    }
+    #[test]
+    fn par_validate_multi_author_message_hash_chain_of_feed_works() {
+        let messages = [
+            MESSAGE_WITH_UNICODE.as_bytes(),
+            MESSAGE_PRIVATE.as_bytes(),
+            MESSAGE_1.as_bytes(),
+        ];
+
+        let result = par_validate_multi_author_message_hash_chain_of_feed(&messages[..]);
+        assert!(result.is_ok());
     }
     #[test]
     fn par_validate_ooo_message_hash_chain_of_feed_with_first_message_works() {
@@ -887,6 +987,18 @@ mod tests {
             MESSAGE_2_INCORRECT_KEY.as_bytes(),
             Some(MESSAGE_1.as_bytes()),
         );
+        match result {
+            Err(Error::ActualHashDidNotMatchKey {
+                message: _,
+                expected_hash: _,
+                actual_hash: _,
+            }) => {}
+            _ => panic!(),
+        }
+    }
+    #[test]
+    fn it_detects_incorrect_key_for_multi_author() {
+        let result = validate_multi_author_message_hash_chain(MESSAGE_2_INCORRECT_KEY.as_bytes());
         match result {
             Err(Error::ActualHashDidNotMatchKey {
                 message: _,
