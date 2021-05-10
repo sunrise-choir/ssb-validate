@@ -143,31 +143,7 @@ pub fn validate_ooo_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
 
     let message_value = message.value;
 
-    // The message value fields are in the correct order.
-    ensure!(
-        is_correct_order(message_bytes),
-        InvalidMessageValueOrder {
-            message: message_bytes.to_owned()
-        }
-    );
-
-    // The hash signature must be `sha256`.
-    ensure!(
-        message_value.hash == "sha256",
-        InvalidHashFunction {
-            message: message_bytes.to_owned()
-        }
-    );
-
-    // The message `content` string must be canonical base64.
-    if let Value::String(private_msg) = &message_value.content.0 {
-        ensure!(
-            is_canonical_base64(private_msg),
-            InvalidBase64 {
-                message: message_bytes,
-            }
-        );
-    }
+    message_value_common_checks(&message_value, None, message_bytes, None, false)?;
 
     if let Some(previous_value) = previous_value.as_ref() {
         // The authors are not allowed to change in a feed.
@@ -311,10 +287,7 @@ where
             || (),
             |_, (idx, msg)| {
                 if idx == 0 {
-                    let prev = match previous {
-                        Some(prev) => Some(prev.as_ref().to_owned()),
-                        _ => None,
-                    };
+                    let prev = previous.map(|prev| prev.as_ref().to_owned());
                     validate_message_hash_chain(msg.as_ref(), prev)
                 } else {
                     validate_message_hash_chain(msg.as_ref(), Some(messages[idx - 1].as_ref()))
@@ -397,10 +370,7 @@ where
             || (),
             |_, (idx, msg)| {
                 if idx == 0 {
-                    let prev = match previous {
-                        Some(prev) => Some(prev.as_ref().to_owned()),
-                        _ => None,
-                    };
+                    let prev = previous.map(|prev| prev.as_ref().to_owned());
                     validate_message_value_hash_chain(msg.as_ref(), prev)
                 } else {
                     validate_message_value_hash_chain(
@@ -505,6 +475,8 @@ pub fn validate_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
         previous_value.as_ref(),
         message_bytes,
         previous_key.as_ref(),
+        // run checks for previous msg
+        true,
     )?;
 
     let verifiable_msg: Value = from_slice(message_bytes).context(InvalidMessage {
@@ -627,6 +599,8 @@ pub fn validate_message_value_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
         previous_value.as_ref(),
         message_bytes,
         previous_key.as_ref(),
+        // run checks for previous msg
+        true,
     )?;
 
     Ok(())
@@ -659,6 +633,7 @@ fn message_value_common_checks(
     previous_value: Option<&SsbMessageValue>,
     message_bytes: &[u8],
     previous_key: Option<&Multihash>,
+    check_previous: bool,
 ) -> Result<()> {
     // The message value fields are in the correct order.
     ensure!(
@@ -686,53 +661,56 @@ fn message_value_common_checks(
         );
     }
 
-    if let Some(previous_value) = previous_value {
-        // The authors are not allowed to change in a feed.
-        ensure!(
-            message_value.author == previous_value.author,
-            AuthorsDidNotMatch {
-                previous_author: previous_value.author.clone(),
-                author: message_value.author.clone()
-            }
-        );
+    if check_previous {
+        if let Some(previous_value) = previous_value {
+            // The authors are not allowed to change in a feed.
+            ensure!(
+                message_value.author == previous_value.author,
+                AuthorsDidNotMatch {
+                    previous_author: previous_value.author.clone(),
+                    author: message_value.author.clone()
+                }
+            );
 
-        // The sequence must increase by one.
-        let expected_sequence = previous_value.sequence + 1;
-        ensure!(
-            message_value.sequence == expected_sequence,
-            InvalidSequenceNumber {
-                message: message_bytes.to_owned(),
-                actual: message_value.sequence,
-                expected: expected_sequence
-            }
-        );
+            // The sequence must increase by one.
+            let expected_sequence = previous_value.sequence + 1;
+            ensure!(
+                message_value.sequence == expected_sequence,
+                InvalidSequenceNumber {
+                    message: message_bytes.to_owned(),
+                    actual: message_value.sequence,
+                    expected: expected_sequence
+                }
+            );
 
-        // msg previous must match hash of previous.value otherwise it's a fork.
-        ensure!(
-            message_value.previous.as_ref().context(PreviousWasNull)?
-                == previous_key.expect("expected the previous key to be Some(key), was None"),
-            ForkedFeed {
-                previous_seq: previous_value.sequence
-            }
-        );
-    } else {
-        //This message is the first message.
+            // msg previous must match hash of previous.value otherwise it's a fork.
+            ensure!(
+                message_value.previous.as_ref().context(PreviousWasNull)?
+                    == previous_key.expect("expected the previous key to be Some(key), was None"),
+                ForkedFeed {
+                    previous_seq: previous_value.sequence
+                }
+            );
+        } else {
+            // This message is the first message.
 
-        //Seq must be 1
-        ensure!(
-            message_value.sequence == 1,
-            FirstMessageDidNotHaveSequenceOfOne {
-                message: message_bytes.to_owned()
-            }
-        );
-        //Previous must be None
-        ensure!(
-            message_value.previous.is_none(),
-            FirstMessageDidNotHavePreviousOfNull {
-                message: message_bytes.to_owned()
-            }
-        );
-    };
+            // Sequence must be 1.
+            ensure!(
+                message_value.sequence == 1,
+                FirstMessageDidNotHaveSequenceOfOne {
+                    message: message_bytes.to_owned()
+                }
+            );
+            // Previous must be None.
+            ensure!(
+                message_value.previous.is_none(),
+                FirstMessageDidNotHavePreviousOfNull {
+                    message: message_bytes.to_owned()
+                }
+            );
+        };
+    }
+
     Ok(())
 }
 
