@@ -3,6 +3,8 @@
 
 > Verify Secure Scuttlebutt (SSB) hash chains (in parallel)
 
+**THIS FORK DEVIATES SIGNIFICANTLY FROM THE ORIGINAL VERSION!** Support for out-of-order validation (regular and parallel) and multi-author out-of-order validation (regular and parallel) has been added.
+
 ## Docs
 
 [Rustdocs](https://sunrise-choir.github.io/ssb-validate/ssb_validate/index.html)
@@ -29,7 +31,11 @@ You can check messages one by one or batch process a collection of them (uses [r
 
 In addition to validating messages using all of the above criteria, it is also possible to validate out-of-order messages by satifying a subset of those criteria. This crate provides functions to perform batch validation of such out-of-order messages.
 
-Out-of-order messages must be authored by a single keypair. However, it is not required that the sequence number of a message be 1 larger than the sequence number of the previous message, nor is it required that the hash of the previous message match the hash given for the previous message in a message.
+Out-of-order message validation may be performed for single-author or multi-author use-cases (separate functions exist for each case).
+
+When performing validation for out-of-order messages from a single author, the messages must be authored by a single keypair. However, it is not required that the sequence number of a message be 1 larger than the sequence number of the previous message, nor is it required that the hash of the previous message match the hash given for the previous message in a message.
+
+Multi-author out-of-order validation, by contrast to the above, does not perform any checks of the `previous` message. Indeed, it may be said that this method of validation has no concept of a previous message (except that the `previous` field must be present in the message in the correct order).
 
 ## Benchmarks
 
