@@ -59,6 +59,8 @@ pub enum Error {
     InvalidHashFunction { message: Vec<u8> },
     #[snafu(display("The message content string must be canonical base64",))]
     InvalidBase64 { message: Vec<u8> },
+    #[snafu(display("The message value must not be longer than 8192 UTF-16 code units",))]
+    InvalidMessageValueLength { message: Vec<u8> },
     #[snafu(display("The sequence must increase by one",))]
     InvalidSequenceNumber {
         message: Vec<u8>,
@@ -711,6 +713,18 @@ fn is_canonical_base64(private_msg: &str) -> bool {
     RE.is_match(private_msg)
 }
 
+fn is_correct_length(msg_value: &SsbMessageValue) -> Result<bool> {
+    // the second arg is used to set `compact` to `false` (preserves whitespace)
+    let msg_value_str = ssb_legacy_msg_data::json::to_string(msg_value, false)
+        .context(InvalidMessageCouldNotSerializeValue)?;
+    let msg_len: usize = msg_value_str.chars().map(|ch| ch.len_utf16()).sum();
+    if msg_len > 8192 {
+        Ok(false)
+    } else {
+        Ok(true)
+    }
+}
+
 fn message_value_common_checks(
     message_value: &SsbMessageValue,
     previous_value: Option<&SsbMessageValue>,
@@ -793,6 +807,15 @@ fn message_value_common_checks(
             );
         };
     }
+
+    // The message `value` length must be less than 8192 UTF-16 code units.
+    // We check this last since serialization is expensive.
+    ensure!(
+        is_correct_length(message_value)?,
+        InvalidMessageValueLength {
+            message: message_bytes.to_owned()
+        }
+    );
 
     Ok(())
 }
