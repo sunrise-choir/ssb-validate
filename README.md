@@ -24,6 +24,7 @@ To be valid, a message should satisfy the following criteria:
  - message value keys must be in the order: "previous", "author"|"sequence", "author"|"sequence", "timestamp", "hash", "content", "signature"
  - the message value must not include extra fields
  - if the message content is a string (encrypted private message) it must be encoded in canonical base64 and end with `.box`
+ - the length of the serialized message value must not exceed 8192 UTF-16 code units
 
 All of the above criteria are validated by this library (either directly or via dependencies).
 
