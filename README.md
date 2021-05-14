@@ -18,23 +18,23 @@ Secure Scuttlebutt "feeds" are a sequence of messages published by one author. T
 
 If the message is the first in the feed:
 
- [x] - the value of the `previous` field must be `null`
- [x] - the value of the `sequence` field must be `1`
+ - the value of the `previous` field must be `null`
+ - the value of the `sequence` field must be `1`
 
 If the message is not the first in the feed:
 
- [x] - the value of the `previous` field must be the hash of the previous message
- [x] - the value of the `sequence` field must be 1 larger than the `sequence` of the previous message
+ - the value of the `previous` field must be the hash of the previous message
+ - the value of the `sequence` field must be 1 larger than the `sequence` of the previous message
 
 Other criteria which all messages must satisfy (unless they are being validated out-of-order):
 
- [x] - the value of the `hash` field must be `sha256`
- [x] - the `author` must not change compared to the previous message
- [x] - if the message includes a `key`, it must be the hash of the `value` of the message
- [x] - message `value` fields must be in the order: `previous`, `author` or `sequence`, `author` or `sequence`, `timestamp`, `hash`, `content`, `signature`
- [x] - the message `value` must not include extra (unexpected) fields
- [x] - the value of the message `content` field must be encoded in canonical base64 and contain `.box` if it is a string (encrypted private message)
- [x] - the length of the serialized message `value` must not exceed 8192 UTF-16 code units
+ - the value of the `hash` field must be `sha256`
+ - the `author` must not change compared to the previous message
+ - if the message includes a `key`, it must be the hash of the `value` of the message
+ - message `value` fields must be in the order: `previous`, `author` or `sequence`, `author` or `sequence`, `timestamp`, `hash`, `content`, `signature`
+ - the message `value` must not include extra (unexpected) fields
+ - the value of the message `content` field must be encoded in canonical base64 and contain `.box` if it is a string (encrypted private message)
+ - the length of the serialized message `value` must not exceed 8192 UTF-16 code units
 
 All of the above criteria are validated by this library (either directly or via dependencies).
 
@@ -51,11 +51,11 @@ Multi-author out-of-order validation, by contrast to the above, does not perform
 ## Useful Documentation
 
  - [Rust docs for the Sunrise Choir version of ssb-validate](https://sunrise-choir.github.io/ssb-validate/ssb_validate/index.html)
- - [Specification for data type, data model, feed and messages](https://spec.scuttlebutt.nz/): detailed information for developers working at the protocol level.
- - [Scuttlebutt Protocol Guide](https://ssbc.github.io/scuttlebutt-protocol-guide/index.html): excellent overview of the SSB protocol (required reading).
- - [User-guide for Sunrise Choir crates](https://dev.scuttlebutt.nz/#/rust/sunrise-choir): should be useful for application developers.
+ - [User-guide for Sunrise Choir crates](https://dev.scuttlebutt.nz/#/rust/sunrise-choir): should be useful for application developers
+ - [Specification for data type, data model, feed and messages](https://spec.scuttlebutt.nz/): detailed information for developers working at the protocol level
+ - [Scuttlebutt Protocol Guide](https://ssbc.github.io/scuttlebutt-protocol-guide/index.html): excellent overview of the SSB protocol (required reading)
 
-The doc comments for this crate and all dependencies can be built and served locally by clonging the repo and running `cargo doc --open`. You can find more information about `cargo doc` [here](https://doc.rust-lang.org/cargo/commands/cargo-doc.html).
+The doc comments for this crate and all dependencies can be built and served locally by cloning the repo and running `cargo doc --open`. You can find more information about `cargo doc` [here](https://doc.rust-lang.org/cargo/commands/cargo-doc.html).
 
 ## License
 
