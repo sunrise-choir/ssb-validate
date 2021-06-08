@@ -4,7 +4,7 @@ version = "1.2.0"
 authors = ["Piet Geursen <pietgeursen@gmail.com>", "Andrew Reid <glyph@mycelial.technology>"]
 edition = "2018"
 description = "Verify Secure Scuttlebutt (SSB) hash chains (in parallel)"
-repository = "https://github.com/mycognosist/ssb-validate"
+repository = "https://github.com/sunrise-choir/ssb-validate"
 documentation = "https://docs.rs/ssb-validate/"
 license = "AGPL-3.0"
 
@@ -14,7 +14,7 @@ regex = "1.5"
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.8.0"
 snafu = "0.6.0"
-ssb-legacy-msg-data = { git = "https://github.com/mycognosist/legacy-msg-data" }
+ssb-legacy-msg-data = { git = "https://github.com/sunrise-choir/legacy-msg-data" }
 ssb-multiformats = "0.4.0" 
 rayon = "1.2.0"
 
