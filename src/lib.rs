@@ -16,12 +16,15 @@
 //!
 //! Benchmarking on Android on a [One Plus 5T](https://en.wikipedia.org/wiki/OnePlus_5T) (8 core arm64) shows that batch processing is ~3.3 times faster.
 //!
+use lazy_static::lazy_static;
 use rayon::prelude::*;
+use regex::bytes::Regex as RegexBytes;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
 use ssb_legacy_msg_data::json::{from_slice, to_vec, DecodeJsonError, EncodeJsonError};
-use ssb_legacy_msg_data::value::Value;
+use ssb_legacy_msg_data::value::{ContentValue, Value};
 use ssb_legacy_msg_data::LegacyF64;
 use ssb_multiformats::multihash::Multihash;
 
@@ -37,6 +40,8 @@ pub enum Error {
         source: DecodeJsonError,
         message: Vec<u8>,
     },
+    #[snafu(display("Message must have keys in correct order",))]
+    InvalidMessageValueOrder { message: Vec<u8> },
     #[snafu(display(
         "Message was invalid. The authors did not match. \nAuthor of previous: {}\n Author: {} ",
         previous_author,
@@ -50,6 +55,12 @@ pub enum Error {
     FirstMessageDidNotHaveSequenceOfOne { message: Vec<u8> },
     #[snafu(display("The first message of a feed must have previous of null",))]
     FirstMessageDidNotHavePreviousOfNull { message: Vec<u8> },
+    #[snafu(display("The message hash must be 'sha256'",))]
+    InvalidHashFunction { message: Vec<u8> },
+    #[snafu(display("The message content string must be canonical base64",))]
+    InvalidBase64 { message: Vec<u8> },
+    #[snafu(display("The message value must not be longer than 8192 UTF-16 code units",))]
+    InvalidMessageValueLength { message: Vec<u8> },
     #[snafu(display("The sequence must increase by one",))]
     InvalidSequenceNumber {
         message: Vec<u8>,
@@ -78,17 +89,213 @@ pub enum Error {
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 struct SsbMessageValue {
     previous: Option<Multihash>,
     author: String,
     sequence: u64,
     timestamp: LegacyF64,
+    hash: String,
+    content: ContentValue,
+    signature: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct SsbMessage {
     key: Multihash,
     value: SsbMessageValue,
+}
+
+/// Check that an out-of-order message is valid without checking the author.
+///
+/// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
+///
+/// This checks that:
+/// - the _actual_ hash matches the hash claimed in `key`
+/// - the message contains the correct fields
+/// - the message value fields are in the correct order
+/// - there are no unexpected top-level fields in the message
+/// - the hash signature is defined as `sha256`
+/// - the message `content` string is canonical base64
+///
+/// This does not check:
+/// - the signature (see ssb-verify-signatures which lets you to batch verification of signatures)
+/// - the previous message
+///   - no check of the sequence to ensure it increments by 1 compared to previous
+///   - no check that the _actual_ hash of the previous message matches the hash claimed in `previous`
+///   - no check that the author has not changed
+
+pub fn validate_multi_author_message_hash_chain<T: AsRef<[u8]>>(message_bytes: T) -> Result<()> {
+    let message_bytes = message_bytes.as_ref();
+
+    let message = from_slice::<SsbMessage>(message_bytes).context(InvalidMessage {
+        message: message_bytes.to_owned(),
+    })?;
+
+    let message_value = message.value;
+
+    message_value_common_checks(&message_value, None, message_bytes, None, false)?;
+
+    let verifiable_msg: Value = from_slice(message_bytes).context(InvalidMessage {
+        message: message_bytes.to_owned(),
+    })?;
+
+    // Get the value from the message as this is what was hashed
+    let verifiable_msg_value = match verifiable_msg {
+        Value::Object(ref o) => o.get("value").context(InvalidMessageNoValue)?,
+        _ => panic!(),
+    };
+
+    // Get the "value" from the message as bytes that we can hash.
+    let value_bytes =
+        to_vec(verifiable_msg_value, false).context(InvalidMessageCouldNotSerializeValue)?;
+
+    let message_actual_multihash = multihash_from_bytes(&value_bytes);
+
+    // The hash of the "value" must match the claimed value stored in the "key"
+    ensure!(
+        message_actual_multihash == message.key,
+        ActualHashDidNotMatchKey {
+            message: message_bytes.to_owned(),
+            actual_hash: message_actual_multihash,
+            expected_hash: message.key,
+        }
+    );
+
+    Ok(())
+}
+
+/// Batch validates a collection of out-of-order messages by multiple authors. No previous message
+/// checks are performed, meaning that missing messages are allowed, the collection is not expected
+/// to be ordered by ascending sequence number and the author is not expected to match between
+/// current and previous message.
+///
+/// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
+
+pub fn par_validate_multi_author_message_hash_chain_of_feed<T: AsRef<[u8]>>(
+    messages: &[T],
+) -> Result<()>
+where
+    [T]: ParallelSlice<T>,
+    T: Sync,
+{
+    messages
+        .par_iter()
+        .enumerate()
+        .try_fold(
+            || (),
+            |_, (_idx, msg)| validate_multi_author_message_hash_chain(msg.as_ref()),
+        )
+        .try_reduce(|| (), |_, _| Ok(()))
+}
+
+/// Check that an out-of-order message is valid.
+///
+/// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
+///
+/// This checks that:
+/// - the author has not changed
+/// - the _actual_ hash matches the hash claimed in `key`
+/// - the message contains the correct fields
+///
+/// This does not check:
+/// - the signature. See ssb-verify-signatures which lets you to batch verification of signatures.
+/// - the sequence increments by 1 compared to previous
+/// - the _actual_ hash of the previous message matches the hash claimed in `previous`
+///
+/// `previous_msg_bytes` will be `None` only when `message_bytes` is the first message by that author.
+
+pub fn validate_ooo_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
+    message_bytes: T,
+    previous_msg_bytes: Option<U>,
+) -> Result<()> {
+    let message_bytes = message_bytes.as_ref();
+
+    let (previous_value, _previous_key) = match previous_msg_bytes {
+        Some(message) => {
+            let previous =
+                from_slice::<SsbMessage>(message.as_ref()).context(InvalidPreviousMessage {
+                    message: message.as_ref().to_owned(),
+                })?;
+            (Some(previous.value), Some(previous.key))
+        }
+        None => (None, None),
+    };
+
+    let message = from_slice::<SsbMessage>(message_bytes).context(InvalidMessage {
+        message: message_bytes.to_owned(),
+    })?;
+
+    let message_value = message.value;
+
+    message_value_common_checks(&message_value, None, message_bytes, None, false)?;
+
+    if let Some(previous_value) = previous_value.as_ref() {
+        // The authors are not allowed to change in a feed.
+        ensure!(
+            message_value.author == previous_value.author,
+            AuthorsDidNotMatch {
+                previous_author: previous_value.author.clone(),
+                author: message_value.author
+            }
+        );
+    }
+
+    let verifiable_msg: Value = from_slice(message_bytes).context(InvalidMessage {
+        message: message_bytes.to_owned(),
+    })?;
+
+    // Get the value from the message as this is what was hashed
+    let verifiable_msg_value = match verifiable_msg {
+        Value::Object(ref o) => o.get("value").context(InvalidMessageNoValue)?,
+        _ => panic!(),
+    };
+
+    // Get the "value" from the message as bytes that we can hash.
+    let value_bytes =
+        to_vec(verifiable_msg_value, false).context(InvalidMessageCouldNotSerializeValue)?;
+
+    let message_actual_multihash = multihash_from_bytes(&value_bytes);
+
+    // The hash of the "value" must match the claimed value stored in the "key"
+    ensure!(
+        message_actual_multihash == message.key,
+        ActualHashDidNotMatchKey {
+            message: message_bytes.to_owned(),
+            actual_hash: message_actual_multihash,
+            expected_hash: message.key,
+        }
+    );
+
+    Ok(())
+}
+
+/// Batch validates a collection of out-of-order messages by a single author. Checks of previous
+/// message hash and ascending sequence number are not performed, meaning that missing
+/// messages are allowed and the collection is not expected to be ordered by ascending sequence
+/// number.
+///
+/// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
+
+pub fn par_validate_ooo_message_hash_chain_of_feed<T: AsRef<[u8]>>(messages: &[T]) -> Result<()>
+where
+    [T]: ParallelSlice<T>,
+    T: Sync,
+{
+    messages
+        .par_iter()
+        .enumerate()
+        .try_fold(
+            || (),
+            |_, (idx, msg)| {
+                if idx == 0 {
+                    validate_ooo_message_hash_chain::<_, &[u8]>(msg.as_ref(), None)
+                } else {
+                    validate_ooo_message_hash_chain(msg.as_ref(), Some(messages[idx - 1].as_ref()))
+                }
+            },
+        )
+        .try_reduce(|| (), |_, _| Ok(()))
 }
 
 /// Batch validates a collection of messages, **all by the same author, ordered by ascending sequence
@@ -165,10 +372,7 @@ where
             || (),
             |_, (idx, msg)| {
                 if idx == 0 {
-                    let prev = match previous {
-                        Some(prev) => Some(prev.as_ref().to_owned()),
-                        _ => None,
-                    };
+                    let prev = previous.map(|prev| prev.as_ref().to_owned());
                     validate_message_hash_chain(msg.as_ref(), prev)
                 } else {
                     validate_message_hash_chain(msg.as_ref(), Some(messages[idx - 1].as_ref()))
@@ -251,10 +455,7 @@ where
             || (),
             |_, (idx, msg)| {
                 if idx == 0 {
-                    let prev = match previous {
-                        Some(prev) => Some(prev.as_ref().to_owned()),
-                        _ => None,
-                    };
+                    let prev = previous.map(|prev| prev.as_ref().to_owned());
                     validate_message_value_hash_chain(msg.as_ref(), prev)
                 } else {
                     validate_message_value_hash_chain(
@@ -359,6 +560,8 @@ pub fn validate_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
         previous_value.as_ref(),
         message_bytes,
         previous_key.as_ref(),
+        // run checks for previous msg
+        true,
     )?;
 
     let verifiable_msg: Value = from_slice(message_bytes).context(InvalidMessage {
@@ -481,6 +684,8 @@ pub fn validate_message_value_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
         previous_value.as_ref(),
         message_bytes,
         previous_key.as_ref(),
+        // run checks for previous msg
+        true,
     )?;
 
     Ok(())
@@ -492,59 +697,126 @@ fn multihash_from_bytes(bytes: &[u8]) -> Multihash {
     Multihash::Message(value_hash.into())
 }
 
+fn is_correct_order(bytes: &[u8]) -> bool {
+    lazy_static! {
+        static ref RE_B: RegexBytes = RegexBytes::new(r#""previous"[\s\S]*("author"|"sequence")[\s\S]*("author"|"sequence")[\s\S]*"timestamp"[\s\S]*"hash"[\s\S]*"content"[\s\S]*"signature""#).unwrap();
+    }
+    RE_B.is_match(bytes)
+}
+
+fn is_canonical_base64(private_msg: &str) -> bool {
+    lazy_static! {
+        // Regex pattern to match on canonical base64 for private messages.
+        // Implemented according to the `is-canonical-base64` JS module by dominictarr.
+        static ref RE: Regex = Regex::new(r"^(?:[a-zA-Z0-9/+]{4})*(?:[a-zA-Z0-9/+](?:(?:[AQgw]==)|(?:[a-zA-Z0-9/+][AEIMQUYcgkosw048]=)))?.box.*$").unwrap();
+    }
+    RE.is_match(private_msg)
+}
+
+fn is_correct_length(msg_value: &SsbMessageValue) -> Result<bool> {
+    // the second arg is used to set `compact` to `false` (preserves whitespace)
+    let msg_value_str = ssb_legacy_msg_data::json::to_string(msg_value, false)
+        .context(InvalidMessageCouldNotSerializeValue)?;
+    let msg_len: usize = msg_value_str.chars().map(|ch| ch.len_utf16()).sum();
+    if msg_len > 8192 {
+        Ok(false)
+    } else {
+        Ok(true)
+    }
+}
+
 fn message_value_common_checks(
     message_value: &SsbMessageValue,
     previous_value: Option<&SsbMessageValue>,
     message_bytes: &[u8],
     previous_key: Option<&Multihash>,
+    check_previous: bool,
 ) -> Result<()> {
-    if let Some(previous_value) = previous_value {
-        // The authors are not allowed to change in a feed.
-        ensure!(
-            message_value.author == previous_value.author,
-            AuthorsDidNotMatch {
-                previous_author: previous_value.author.clone(),
-                author: message_value.author.clone()
-            }
-        );
+    // The message value fields are in the correct order.
+    ensure!(
+        is_correct_order(message_bytes),
+        InvalidMessageValueOrder {
+            message: message_bytes.to_owned()
+        }
+    );
 
-        // The sequence must increase by one.
-        let expected_sequence = previous_value.sequence + 1;
-        ensure!(
-            message_value.sequence == expected_sequence,
-            InvalidSequenceNumber {
-                message: message_bytes.to_owned(),
-                actual: message_value.sequence,
-                expected: expected_sequence
-            }
-        );
+    // The hash signature must be `sha256`.
+    ensure!(
+        message_value.hash == "sha256",
+        InvalidHashFunction {
+            message: message_bytes.to_owned()
+        }
+    );
 
-        // msg previous must match hash of previous.value otherwise it's a fork.
+    // The message `content` string must be canonical base64.
+    if let Value::String(private_msg) = &message_value.content.0 {
         ensure!(
-            message_value.previous.as_ref().context(PreviousWasNull)?
-                == previous_key.expect("expected the previous key to be Some(key), was None"),
-            ForkedFeed {
-                previous_seq: previous_value.sequence
+            is_canonical_base64(private_msg),
+            InvalidBase64 {
+                message: message_bytes,
             }
         );
-    } else {
-        //This message is the first message.
+    }
 
-        //Seq must be 1
-        ensure!(
-            message_value.sequence == 1,
-            FirstMessageDidNotHaveSequenceOfOne {
-                message: message_bytes.to_owned()
-            }
-        );
-        //Previous must be None
-        ensure!(
-            message_value.previous.is_none(),
-            FirstMessageDidNotHavePreviousOfNull {
-                message: message_bytes.to_owned()
-            }
-        );
-    };
+    if check_previous {
+        if let Some(previous_value) = previous_value {
+            // The authors are not allowed to change in a feed.
+            ensure!(
+                message_value.author == previous_value.author,
+                AuthorsDidNotMatch {
+                    previous_author: previous_value.author.clone(),
+                    author: message_value.author.clone()
+                }
+            );
+
+            // The sequence must increase by one.
+            let expected_sequence = previous_value.sequence + 1;
+            ensure!(
+                message_value.sequence == expected_sequence,
+                InvalidSequenceNumber {
+                    message: message_bytes.to_owned(),
+                    actual: message_value.sequence,
+                    expected: expected_sequence
+                }
+            );
+
+            // msg previous must match hash of previous.value otherwise it's a fork.
+            ensure!(
+                message_value.previous.as_ref().context(PreviousWasNull)?
+                    == previous_key.expect("expected the previous key to be Some(key), was None"),
+                ForkedFeed {
+                    previous_seq: previous_value.sequence
+                }
+            );
+        } else {
+            // This message is the first message.
+
+            // Sequence must be 1.
+            ensure!(
+                message_value.sequence == 1,
+                FirstMessageDidNotHaveSequenceOfOne {
+                    message: message_bytes.to_owned()
+                }
+            );
+            // Previous must be None.
+            ensure!(
+                message_value.previous.is_none(),
+                FirstMessageDidNotHavePreviousOfNull {
+                    message: message_bytes.to_owned()
+                }
+            );
+        };
+    }
+
+    // The message `value` length must be less than 8192 UTF-16 code units.
+    // We check this last since serialization is expensive.
+    ensure!(
+        is_correct_length(message_value)?,
+        InvalidMessageValueLength {
+            message: message_bytes.to_owned()
+        }
+    );
+
     Ok(())
 }
 
@@ -563,10 +835,74 @@ fn node_buffer_binary_serializer(text: &str) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        par_validate_message_hash_chain_of_feed, validate_message_hash_chain,
-        validate_message_value_hash_chain, Error,
+        par_validate_message_hash_chain_of_feed,
+        par_validate_multi_author_message_hash_chain_of_feed,
+        par_validate_ooo_message_hash_chain_of_feed, validate_message_hash_chain,
+        validate_message_value_hash_chain, validate_multi_author_message_hash_chain,
+        validate_ooo_message_hash_chain, Error,
     };
+    #[test]
+    fn it_works_multi_author() {
+        assert!(validate_multi_author_message_hash_chain(MESSAGE_2.as_bytes()).is_ok());
+    }
+    #[test]
+    fn it_works_ooo_messages_without_first_message() {
+        assert!(
+            validate_ooo_message_hash_chain(MESSAGE_2.as_bytes(), Some(MESSAGE_3.as_bytes()))
+                .is_ok()
+        );
+    }
+    #[test]
+    fn it_works_ooo_messages() {
+        assert!(
+            validate_ooo_message_hash_chain(MESSAGE_3.as_bytes(), Some(MESSAGE_1.as_bytes()))
+                .is_ok()
+        );
+    }
+    #[test]
+    fn it_validates_a_private_message_ooo() {
+        let result = validate_ooo_message_hash_chain::<_, &[u8]>(MESSAGE_PRIVATE.as_bytes(), None);
 
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn it_detects_invalid_base64_for_private_message_ooo() {
+        let result =
+            validate_ooo_message_hash_chain::<_, &[u8]>(MESSAGE_PRIVATE_INVALID.as_bytes(), None);
+        match result {
+            Err(Error::InvalidBase64 { message: _ }) => {}
+            _ => panic!(),
+        }
+    }
+    #[test]
+    fn par_validate_multi_author_message_hash_chain_of_feed_works() {
+        let messages = [
+            MESSAGE_WITH_UNICODE.as_bytes(),
+            MESSAGE_PRIVATE.as_bytes(),
+            MESSAGE_1.as_bytes(),
+        ];
+
+        let result = par_validate_multi_author_message_hash_chain_of_feed(&messages[..]);
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn par_validate_ooo_message_hash_chain_of_feed_with_first_message_works() {
+        let messages = [
+            MESSAGE_1.as_bytes(),
+            MESSAGE_3.as_bytes(),
+            MESSAGE_2.as_bytes(),
+        ];
+
+        let result = par_validate_ooo_message_hash_chain_of_feed(&messages[..]);
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn par_validate_ooo_message_hash_chain_of_feed_without_first_message_works() {
+        let messages = [MESSAGE_3.as_bytes(), MESSAGE_2.as_bytes()];
+
+        let result = par_validate_ooo_message_hash_chain_of_feed(&messages[..]);
+        assert!(result.is_ok());
+    }
     #[test]
     fn it_works_first_message() {
         assert!(validate_message_hash_chain::<_, &[u8]>(MESSAGE_1.as_bytes(), None).is_ok());
@@ -684,6 +1020,31 @@ mod tests {
         }
     }
     #[test]
+    fn it_detects_incorrect_key_for_multi_author() {
+        let result = validate_multi_author_message_hash_chain(MESSAGE_2_INCORRECT_KEY.as_bytes());
+        match result {
+            Err(Error::ActualHashDidNotMatchKey {
+                message: _,
+                expected_hash: _,
+                actual_hash: _,
+            }) => {}
+            _ => panic!(),
+        }
+    }
+    #[test]
+    fn it_detects_extra_unwanted_field() {
+        let result =
+            validate_message_hash_chain::<_, &[u8]>(MESSAGE_WITH_EXTRA_FIELD.as_bytes(), None);
+        // code: Message("unknown field `extra`, expected one of ...
+        match result {
+            Err(Error::InvalidMessage {
+                source: _,
+                message: _,
+            }) => {}
+            _ => panic!(),
+        }
+    }
+    #[test]
     fn it_detects_fork() {
         let result =
             validate_message_hash_chain(MESSAGE_2_FORK.as_bytes(), Some(MESSAGE_1.as_bytes()));
@@ -692,7 +1053,29 @@ mod tests {
             _ => panic!(),
         }
     }
-
+    #[test]
+    fn it_detects_missing_hash_function() {
+        let result =
+            validate_message_hash_chain::<_, &[u8]>(MESSAGE_WITHOUT_HASH_FUNCTION.as_bytes(), None);
+        match result {
+            Err(Error::InvalidMessage {
+                source: _,
+                message: _,
+            }) => {}
+            _ => panic!(),
+        }
+    }
+    #[test]
+    fn it_detects_incorrect_hash_function() {
+        let result = validate_message_hash_chain::<_, &[u8]>(
+            MESSAGE_WITH_INVALID_HASH_FUNCTION.as_bytes(),
+            None,
+        );
+        match result {
+            Err(Error::InvalidHashFunction { message: _ }) => {}
+            _ => panic!(),
+        }
+    }
     #[test]
     fn it_validates_a_message_with_unicode() {
         let result = validate_message_hash_chain(
@@ -701,6 +1084,37 @@ mod tests {
         );
 
         assert!(result.is_ok());
+    }
+    #[test]
+    fn it_detects_incorrect_message_value_order() {
+        let result = validate_message_hash_chain(
+            MESSAGE_2_INVALID_ORDER.as_bytes(),
+            Some(MESSAGE_1.as_bytes()),
+        );
+        match result {
+            Err(Error::InvalidMessageValueOrder { message: _ }) => {}
+            _ => panic!(),
+        }
+    }
+    #[test]
+    fn it_validates_a_private_message() {
+        let result = validate_message_hash_chain(
+            MESSAGE_PRIVATE.as_bytes(),
+            Some(MESSAGE_PRIVATE_PREV.as_bytes()),
+        );
+
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn it_detects_invalid_base64_for_private_message() {
+        let result = validate_message_hash_chain(
+            MESSAGE_PRIVATE_INVALID.as_bytes(),
+            Some(MESSAGE_PRIVATE_PREV.as_bytes()),
+        );
+        match result {
+            Err(Error::InvalidBase64 { message: _ }) => {}
+            _ => panic!(),
+        }
     }
 
     const MESSAGE_1: &str = r##"{
@@ -776,6 +1190,30 @@ mod tests {
     "sequence": 2,
     "timestamp": 1470187292812,
     "hash": "sha256",
+    "content": {
+      "type": "about",
+      "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+      "image": {
+        "link": "&MxwsfZoq7X6oqnEX/TWIlAqd6S+jsUA6T1hqZYdl7RM=.sha256",
+        "size": 642763,
+        "type": "image/png",
+        "width": 512,
+        "height": 512
+      }
+    },
+    "signature": "j3C7Us3JDnSUseF4ycRB0dTMs0xC6NAriAFtJWvx2uyz0K4zSj6XL8YA4BVqv+AHgo08+HxXGrpJlZ3ADwNnDw==.sig.ed25519"
+  },
+  "timestamp": 1571140551485
+}"##;
+
+    const MESSAGE_2_INVALID_ORDER: &str = r##"{
+  "key": "%kLWDux4wCG+OdQWAHnpBGzGlCehqMLfgLbzlKCvgesU=.sha256",
+  "value": {
+    "previous": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
+    "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+    "sequence": 2,
+    "hash": "sha256",
+    "timestamp": 1470187292812,
     "content": {
       "type": "about",
       "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
@@ -986,5 +1424,102 @@ mod tests {
     "signature": "9Dh6hj/gdrruYNh/rkELEJrk0+quhQF1VfU7veJ8Yb/cDUHzaQWue2YljRuERThlyd+92cOfA4PujfNC2VbTDA==.sig.ed25519"
   },
   "timestamp": 1571140555382.002
+}"##;
+
+    const MESSAGE_WITHOUT_HASH_FUNCTION: &str = r##"{
+  "key": "%8Y0PR6EAoyObJhJZf2YQNn5B3RaCDzsrVrj2XxgRPhE=.sha256",
+  "value": {
+    "previous": null,
+    "author": "@AzvddyStfk/T95/3VuHxuJRwqqpBkCyoW7qHRCui2N4=.ed25519",
+    "sequence": 1,
+    "timestamp": 1491901740000,
+    "content": {
+      "type": "invalid"
+    },
+    "signature": "sI9Nhe0HRC/W0q1DrgB4t0gkuBXLdgU6JMwZS59d6ZAitbF12H+6u9vXnE7ssikw4B4v+D0IvCSB2jRhXDICBw==.sig.ed25519"
+    },
+    "timestamp": 1571140555382.002
+}"##;
+
+    const MESSAGE_WITH_INVALID_HASH_FUNCTION: &str = r##"{
+  "key": "%nAzZR0XlsCzr1yb/jrSOAKGEol0cST0XMB3LYfPJheA=.sha256",
+  "value": {
+    "previous": null,
+    "author": "@AzvddyStfk/T95/3VuHxuJRwqqpBkCyoW7qHRCui2N4=.ed25519",
+    "sequence": 1,
+    "timestamp": 1491901740000,
+    "hash": "oanteuhnoatehuneotuh",
+    "content": {
+      "type": "invalid"
+    },
+    "signature": "9OAbsQs2qhSLhjKH6DRoJepk/pMLnyFux87Xm+Oz4otTwocYdKeXZuHMj+6tzZJ7jzYpqNmh8sQ/vTtRCUFZCg==.sig.ed25519"
+  },
+  "timestamp": 1571140555382.002
+}"##;
+
+    const MESSAGE_WITH_EXTRA_FIELD: &str = r##"{
+  "key": "%aR6KXa2nhQicxWGOv3ECWjUeysve/0p1HTAGmnt7u2w=.sha256",
+  "value": {
+    "previous": null,
+    "author": "@AzvddyStfk/T95/3VuHxuJRwqqpBkCyoW7qHRCui2N4=.ed25519",
+    "sequence": 1,
+    "timestamp": 1491901740000,
+    "hash": "sha256",
+    "content": {
+      "type": "invalid"
+    },
+    "signature": "tECMcZunn58MckGfUBL0GTqiy7Svfqs2Z+vgqxmdz5i5cjHg/WR4Glj1HX4B0ioSa+HeDyOBVG5s2HhXEEtUCQ==.sig.ed25519",
+    "extra": "INVALID"
+    },
+  "timestamp": 1571140555382.002
+}"##;
+
+    const MESSAGE_PRIVATE: &str = r##"{
+  "key": "%uN9G3nZ+IYrCiC8Qmqb8J8hnefc486pZGeWyqBomAi8=.sha256",
+  "value": {
+    "previous": "%Z694dkKDUmNtoSwwjLG9cl7j0Dd26EDp0DRDmyPl1Lc=.sha256",
+    "sequence": 24148,
+    "author": "@iL6NzQoOLFP18pCpprkbY80DMtiG4JFFtVSVUaoGsOQ=.ed25519",
+    "timestamp": 1620171292121,
+    "hash": "sha256",
+    "content": "siZEm1zFx1icq0SrEynGDpNRmJCXMxTB3iEteXFn+IhJH8WhMbT8tp9qOIaFkIYcdOyerSon6RK0l4RE1ZdDh/3lcGZSdP0Ljq59qsdqlf2ngwbIbV9AWdPRrPsoVZBV6RhI+YcVTloWWP5aauu1hZKjcm62ezLBTQ3EmFPYtDuwsOFkx9/7FP97ljhj67CwvlGzuiWp6FNICHbt5kOCxs9H0k6Tr8JJVdaJtJ2pqkX4p0ECMuEuYxCYbh3FpncCqlNZJXb0dj3iSsfsMNWTJLDqfkqJKH1jBVfxDL6+xAXBDS+E4F2hD4y9gRDZEej99uVBQWlbxr5eCRV+VbfBGYxwoAYtqux6rg3jBabImKKinBwHShEP5F/+wlb9IxQn4swyOgyv+UKx/jbx+91Ayso5bnNPZMpwRRX5p5DbpK1BnryeVJhktMgFqgni1g0lHyU8sQ2QzwZgXGw7dfYoamkqK4D24NOLnUoHuVuhd7Q5SxZWSAO6wpDa4nrODePoJdl328pbMwCoQlUNeHINmKxh/o/oCNbgXitn4oN3kSVEg/umdgwwI94gmZUjiYwP1v7HA7dI.box",
+    "signature": "n4Wepa4fxq+xLlmfCxwiC489rMZlnnrBFOkWMuGAv80O7GK0XZUn1zfuCP9fQBab1+P0m1g+OLiyWwqHnwdTBw==.sig.ed25519"
+    },
+  "timestamp": 1620198134771
+}"##;
+
+    const MESSAGE_PRIVATE_PREV: &str = r##"{
+  "key": "%Z694dkKDUmNtoSwwjLG9cl7j0Dd26EDp0DRDmyPl1Lc=.sha256",
+  "value": {
+    "previous": "%cN1F3DkKC3bfxZlwWY98xqzsoQGEC9sRNe9HYm6khhk=.sha256",
+    "sequence": 24147,
+    "author": "@iL6NzQoOLFP18pCpprkbY80DMtiG4JFFtVSVUaoGsOQ=.ed25519",
+    "timestamp": 1620136240655,
+    "hash": "sha256",
+    "content": {
+      "type": "vote",
+      "vote": {
+        "link": "%SXw+GJZZBvS7neNDfuyu2UXmGD3Gl8jMxX2PPc7sjCs=.sha256",
+        "value": 1,
+        "expression": "Like"
+      }
+    },
+    "signature": "iA958Ct3+9Z3tZZcbXvF4BAFVPJZ8MhfqnWOgzwhLdviL1KE3xTKn4joJl1a+mnqSLHbH/QT3NHQu378GdsHBg==.sig.ed25519"
+    },
+  "timestamp": 1620137278131.001
+}"##;
+
+    const MESSAGE_PRIVATE_INVALID: &str = r##"{
+  "key": "%uN9G3nZ+IYrCiC8Qmqb8J8hnefc486pZGeWyqBomAi8=.sha256",
+  "value": {
+    "previous": "%Z694dkKDUmNtoSwwjLG9cl7j0Dd26EDp0DRDmyPl1Lc=.sha256",
+    "sequence": 24148,
+    "author": "@iL6NzQoOLFP18pCpprkbY80DMtiG4JFFtVSVUaoGsOQ=.ed25519",
+    "timestamp": 1620171292121,
+    "hash": "sha256",
+    "content": "==siZEm1zFx1icq0SrEynGDpNRmJCXMxTB3iEteXFn+IhJH8WhMbT8tp9qOIaFkIYcdOyerSon6RK0l4RE1ZdDh/3lcGZSdP0Ljq59qsdqlf2ngwbIbV9AWdPRrPsoVZBV6RhI+YcVTloWWP5aauu1hZKjcm62ezLBTQ3EmFPYtDuwsOFkx9/7FP97ljhj67CwvlGzuiWp6FNICHbt5kOCxs9H0k6Tr8JJVdaJtJ2pqkX4p0ECMuEuYxCYbh3FpncCqlNZJXb0dj3iSsfsMNWTJLDqfkqJKH1jBVfxDL6+xAXBDS+E4F2hD4y9gRDZEej99uVBQWlbxr5eCRV+VbfBGYxwoAYtqux6rg3jBabImKKinBwHShEP5F/+wlb9IxQn4swyOgyv+UKx/jbx+91Ayso5bnNPZMpwRRX5p5DbpK1BnryeVJhktMgFqgni1g0lHyU8sQ2QzwZgXGw7dfYoamkqK4D24NOLnUoHuVuhd7Q5SxZWSAO6wpDa4nrODePoJdl328pbMwCoQlUNeHINmKxh/o/oCNbgXitn4oN3kSVEg/umdgwwI94gmZUjiYwP1v7HA7dI.box",
+    "signature": "n4Wepa4fxq+xLlmfCxwiC489rMZlnnrBFOkWMuGAv80O7GK0XZUn1zfuCP9fQBab1+P0m1g+OLiyWwqHnwdTBw==.sig.ed25519"
+    },
+  "timestamp": 1620198134771
 }"##;
 }
