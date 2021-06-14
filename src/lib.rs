@@ -90,7 +90,7 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
-struct SsbMessageValue {
+pub struct SsbMessageValue {
     previous: Option<Multihash>,
     author: String,
     sequence: u64,
@@ -101,9 +101,9 @@ struct SsbMessageValue {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct SsbMessage {
-    key: Multihash,
-    value: SsbMessageValue,
+pub struct SsbMessage {
+    pub key: Multihash,
+    pub value: SsbMessageValue,
 }
 
 /// Check that an out-of-order message is valid without checking the author.
@@ -691,7 +691,7 @@ pub fn validate_message_value_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     Ok(())
 }
 
-fn multihash_from_bytes(bytes: &[u8]) -> Multihash {
+pub fn multihash_from_bytes(bytes: &[u8]) -> Multihash {
     let value_bytes_latin = node_buffer_binary_serializer(std::str::from_utf8(bytes).unwrap());
     let value_hash = Sha256::digest(value_bytes_latin.as_slice());
     Multihash::Message(value_hash.into())
