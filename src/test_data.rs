@@ -1,3 +1,5 @@
+//! Secure Scuttlebutt messages used for testing.
+
 pub const MESSAGE_1: &str = r##"{
   "key": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
   "value": {

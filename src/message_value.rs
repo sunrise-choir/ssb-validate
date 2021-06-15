@@ -1,3 +1,4 @@
+//! Functions for validating message values (ie. just the `value` without `key` and `timestamp`).
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use snafu::{ensure, OptionExt, ResultExt};
@@ -16,6 +17,9 @@ use crate::error::{
 };
 use crate::utils;
 
+/// Data type representing the `value` of a message object (`KVT`). More information concerning the
+/// data model can be found
+/// in the [`Metadata` documentation](https://spec.scuttlebutt.nz/feed/messages.html#metadata).
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct SsbMessageValue {
@@ -26,12 +30,6 @@ pub struct SsbMessageValue {
     pub hash: String,
     pub content: ContentValue,
     pub signature: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct SsbMessage {
-    key: Multihash,
-    value: SsbMessageValue,
 }
 
 /// Batch validates a collection of message values, **all by the same author, ordered by ascending sequence
@@ -90,7 +88,6 @@ struct SsbMessage {
 /// let result = par_validate_message_value_hash_chain_of_feed::<_, &[u8]>(&messages, None);
 /// assert!(result.is_ok());
 ///```
-
 pub fn par_validate_message_value_hash_chain_of_feed<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     messages: &[T],
     previous: Option<U>,
@@ -218,6 +215,8 @@ pub fn validate_message_value_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     Ok(())
 }
 
+/// Validation checks which are common across all contexts. The `check_previous` argument is used
+/// to control checks for the optional `previous_value` and `previous_key` parameters.
 pub fn message_value_common_checks(
     message_value: &SsbMessageValue,
     previous_value: Option<&SsbMessageValue>,

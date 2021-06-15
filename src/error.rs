@@ -1,3 +1,11 @@
+//! Custom error type with all possible variants for this library.
+//!
+//! Error variants are imported into other crate modules as required. The [`snafu`](https://docs.rs/snafu/0.6.10) crate is
+//! used here to "assign underlying errors into domain-specific errors while adding context." Note that the visibility
+//! attribute has been applied to `Error` to make the variants useable throughout the crate (see the `snafu` documentation
+//! on [Controlling Visibility](https://docs.rs/snafu/0.6.10/snafu/guide/attributes/index.html#controlling-visibility)
+//! for more information). This approach deviates from the recommended usage of the snafu library but has been taken here
+//! to simplify reasoning about error-handling in this library.
 use snafu::Snafu;
 use ssb_legacy_msg_data::json::{DecodeJsonError, EncodeJsonError};
 use ssb_multiformats::multihash::Multihash;

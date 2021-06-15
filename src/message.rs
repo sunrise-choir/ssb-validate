@@ -1,3 +1,4 @@
+//! Functions for validating messages in the form of `KVT` (`key`, `value`, `timestamp`).
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use snafu::{ensure, OptionExt, ResultExt};
@@ -14,6 +15,7 @@ use crate::error::{
 use crate::message_value::{message_value_common_checks, SsbMessageValue};
 use crate::utils;
 
+/// Data type representing a `key-value` message object, where the `key` is a hash of the `value`.
 #[derive(Serialize, Deserialize, Debug)]
 struct SsbMessage {
     key: Multihash,
@@ -38,7 +40,6 @@ struct SsbMessage {
 ///   - no check of the sequence to ensure it increments by 1 compared to previous
 ///   - no check that the _actual_ hash of the previous message matches the hash claimed in `previous`
 ///   - no check that the author has not changed
-
 pub fn validate_multi_author_message_hash_chain<T: AsRef<[u8]>>(message_bytes: T) -> Result<()> {
     let message_bytes = message_bytes.as_ref();
 
@@ -85,7 +86,6 @@ pub fn validate_multi_author_message_hash_chain<T: AsRef<[u8]>>(message_bytes: T
 /// current and previous message.
 ///
 /// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
-
 pub fn par_validate_multi_author_message_hash_chain_of_feed<T: AsRef<[u8]>>(
     messages: &[T],
 ) -> Result<()>
@@ -118,7 +118,6 @@ where
 /// - the _actual_ hash of the previous message matches the hash claimed in `previous`
 ///
 /// `previous_msg_bytes` will be `None` only when `message_bytes` is the first message by that author.
-
 pub fn validate_ooo_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     message_bytes: T,
     previous_msg_bytes: Option<U>,
@@ -190,7 +189,6 @@ pub fn validate_ooo_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
 /// number.
 ///
 /// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
-
 pub fn par_validate_ooo_message_hash_chain_of_feed<T: AsRef<[u8]>>(messages: &[T]) -> Result<()>
 where
     [T]: ParallelSlice<T>,
@@ -212,8 +210,8 @@ where
         .try_reduce(|| (), |_, _| Ok(()))
 }
 
-/// Batch validates a collection of messages, **all by the same author, ordered by ascending sequence
-/// number, with no missing messages**.
+/// Batch validates a collection of messages, all by the same author, ordered by ascending sequence
+/// number, with no missing messages.
 ///
 /// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
 ///
@@ -269,7 +267,6 @@ where
 /// let result = par_validate_message_hash_chain_of_feed::<_, &[u8]>(&messages, None);
 /// assert!(result.is_ok());
 ///```
-
 pub fn par_validate_message_hash_chain_of_feed<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     messages: &[T],
     previous: Option<U>,
