@@ -155,6 +155,43 @@ pub const MESSAGE_3: &str = r##"{
   "timestamp": 1571140551497
 }"##;
 
+pub const MESSAGE_VALUE_3: &str = r##"{
+  "previous": "%kLWDux4wCG+OdQWAHnpBGzGlCehqMLfgLbzlKCvgesU=.sha256",
+  "author": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+  "sequence": 3,
+  "timestamp": 1470187303671,
+  "hash": "sha256",
+  "content": {
+    "type": "contact",
+    "contact": "@8HsIHUvTaWg8IXHpsb8dmDtKH8qLOrSNwNm298OkGoY=.ed25519",
+    "following": true,
+    "blocking": false
+  },
+  "signature": "PWhsT9c8HQMhJEohV0tF5mfSnZy0rU0CInnvah+whlMuYDQAjzpmW9be9X8eWVAsqbepS+5I7A7ttvwEonSaBg==.sig.ed25519"
+}"##;
+
+//This message will not hash correctly AND would fail signature verification. But an attacker
+//could publish a message that had correct hashes and signatures.
+pub const MESSAGE_VALUE_3_INCORRECT_AUTHOR: &str = r##"{
+  "previous": "%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256",
+  "author": "@xzSRT0HSAqGuqu5HxJvqxtp2FJGpt5nRPIHMznLoBao=.ed25519",
+  "sequence": 2,
+  "timestamp": 1470187292812,
+  "hash": "sha256",
+  "content": {
+    "type": "about",
+    "about": "@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519",
+    "image": {
+      "link": "&MxwsfZoq7X6oqnEX/TWIlAqd6S+jsUA6T1hqZYdl7RM=.sha256",
+      "size": 642763,
+      "type": "image/png",
+      "width": 512,
+      "height": 512
+    }
+  },
+  "signature": "j3C7Us3JDnSUseF4ycRB0dTMs0xC6NAriAFtJWvx2uyz0K4zSj6XL8YA4BVqv+AHgo08+HxXGrpJlZ3ADwNnDw==.sig.ed25519"
+}"##;
+
 pub const MESSAGE_2_PREVIOUS_NULL: &str = r##"{
   "key": "%kLWDux4wCG+OdQWAHnpBGzGlCehqMLfgLbzlKCvgesU=.sha256",
   "value": {
