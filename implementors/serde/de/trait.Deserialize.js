@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["ssb_validate"] = [{"text":"impl&lt;'de&gt; <a class=\"trait\" href=\"https://docs.rs/serde/1.0.126/serde/de/trait.Deserialize.html\" title=\"trait serde::de::Deserialize\">Deserialize</a>&lt;'de&gt; for <a class=\"struct\" href=\"ssb_validate/message_value/struct.SsbMessageValue.html\" title=\"struct ssb_validate::message_value::SsbMessageValue\">SsbMessageValue</a>","synthetic":false,"types":["ssb_validate::message_value::SsbMessageValue"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

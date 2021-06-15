@@ -1,0 +1,151 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/error.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>error.rs - source</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../light.css"  id="themeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css" disabled ><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled ><script id="default-settings"></script><script src="../../storage.js"></script><script src="../../crates.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" type="image/svg+xml" href="../../favicon.svg">
+<link rel="alternate icon" type="image/png" href="../../favicon-16x16.png">
+<link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><style type="text/css">#crate-search{background-image:url("../../down-arrow.svg");}</style></head><body class="rustdoc source"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a href='../../ssb_validate/index.html'><div class='logo-container rust-logo'><img src='../../rust-logo.png' alt='logo'></div></a></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu"><img src="../../brush.svg" width="18" height="18" alt="Pick another theme!"></button><div id="theme-choices" role="menu"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" class="help-button">?</button>
+                <a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" height="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><pre class="line-numbers"><span id="1"> 1</span>
+<span id="2"> 2</span>
+<span id="3"> 3</span>
+<span id="4"> 4</span>
+<span id="5"> 5</span>
+<span id="6"> 6</span>
+<span id="7"> 7</span>
+<span id="8"> 8</span>
+<span id="9"> 9</span>
+<span id="10">10</span>
+<span id="11">11</span>
+<span id="12">12</span>
+<span id="13">13</span>
+<span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
+<span id="17">17</span>
+<span id="18">18</span>
+<span id="19">19</span>
+<span id="20">20</span>
+<span id="21">21</span>
+<span id="22">22</span>
+<span id="23">23</span>
+<span id="24">24</span>
+<span id="25">25</span>
+<span id="26">26</span>
+<span id="27">27</span>
+<span id="28">28</span>
+<span id="29">29</span>
+<span id="30">30</span>
+<span id="31">31</span>
+<span id="32">32</span>
+<span id="33">33</span>
+<span id="34">34</span>
+<span id="35">35</span>
+<span id="36">36</span>
+<span id="37">37</span>
+<span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+</pre><div class="example-wrap"><pre class="rust ">
+<span class="doccomment">//! Custom error type with all possible variants for this library.</span>
+<span class="doccomment">//!</span>
+<span class="doccomment">//! Error variants are imported into other crate modules as required. The [`snafu`](https://docs.rs/snafu/0.6.10) crate is</span>
+<span class="doccomment">//! used here to &quot;assign underlying errors into domain-specific errors while adding context.&quot; Note that the visibility</span>
+<span class="doccomment">//! attribute has been applied to `Error` to make the variants useable throughout the crate (see the `snafu` documentation</span>
+<span class="doccomment">//! on [Controlling Visibility](https://docs.rs/snafu/0.6.10/snafu/guide/attributes/index.html#controlling-visibility)</span>
+<span class="doccomment">//! for more information). This approach deviates from the recommended usage of the snafu library but has been taken here</span>
+<span class="doccomment">//! to simplify reasoning about error-handling in this library.</span>
+<span class="kw">use</span> <span class="ident">snafu</span>::<span class="ident">Snafu</span>;
+<span class="kw">use</span> <span class="ident">ssb_legacy_msg_data</span>::<span class="ident">json</span>::{<span class="ident">DecodeJsonError</span>, <span class="ident">EncodeJsonError</span>};
+<span class="kw">use</span> <span class="ident">ssb_multiformats</span>::<span class="ident">multihash</span>::<span class="ident">Multihash</span>;
+
+<span class="kw">pub</span> <span class="kw">type</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">T</span>, <span class="ident">E</span> <span class="op">=</span> <span class="ident">Error</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">std</span>::<span class="ident">result</span>::<span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">T</span>, <span class="ident">E</span><span class="op">&gt;</span>;
+
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Snafu</span>)]</span>
+<span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">visibility</span> <span class="op">=</span> <span class="string">&quot;pub(crate)&quot;</span>)]</span>
+<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">Error</span> {
+    <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">display</span>(<span class="string">&quot;Previous message was invalid. Decoding failed with: {}&quot;</span>, <span class="ident">source</span>))]</span>
+    <span class="ident">InvalidPreviousMessage</span> {
+        <span class="ident">source</span>: <span class="ident">DecodeJsonError</span>,
+        <span class="ident">message</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
+    },
+    <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">display</span>(<span class="string">&quot;Message was invalid. Decoding failed with: {}&quot;</span>, <span class="ident">source</span>))]</span>
+    <span class="ident">InvalidMessage</span> {
+        <span class="ident">source</span>: <span class="ident">DecodeJsonError</span>,
+        <span class="ident">message</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
+    },
+    <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">display</span>(<span class="string">&quot;Message must have keys in correct order&quot;</span>,))]</span>
+    <span class="ident">InvalidMessageValueOrder</span> { <span class="ident">message</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> },
+    <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">display</span>(
+        <span class="string">&quot;Message was invalid. The authors did not match. \nAuthor of previous: {}\n Author: {} &quot;</span>,
+        <span class="ident">previous_author</span>,
+        <span class="ident">author</span>
+    ))]</span>
+    <span class="ident">AuthorsDidNotMatch</span> {
+        <span class="ident">previous_author</span>: <span class="ident">String</span>,
+        <span class="ident">author</span>: <span class="ident">String</span>,
+    },
+    <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">display</span>(<span class="string">&quot;The first message of a feed must have seq of 1&quot;</span>,))]</span>
+    <span class="ident">FirstMessageDidNotHaveSequenceOfOne</span> { <span class="ident">message</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> },
+    <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">display</span>(<span class="string">&quot;The first message of a feed must have previous of null&quot;</span>,))]</span>
+    <span class="ident">FirstMessageDidNotHavePreviousOfNull</span> { <span class="ident">message</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> },
+    <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">display</span>(<span class="string">&quot;The message hash must be &#39;sha256&#39;&quot;</span>,))]</span>
+    <span class="ident">InvalidHashFunction</span> { <span class="ident">message</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> },
+    <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">display</span>(<span class="string">&quot;The message content string must be canonical base64&quot;</span>,))]</span>
+    <span class="ident">InvalidBase64</span> { <span class="ident">message</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> },
+    <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">display</span>(<span class="string">&quot;The message value must not be longer than 8192 UTF-16 code units&quot;</span>,))]</span>
+    <span class="ident">InvalidMessageValueLength</span> { <span class="ident">message</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> },
+    <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">display</span>(<span class="string">&quot;The sequence must increase by one&quot;</span>,))]</span>
+    <span class="ident">InvalidSequenceNumber</span> {
+        <span class="ident">message</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
+        <span class="ident">actual</span>: <span class="ident">u64</span>,
+        <span class="ident">expected</span>: <span class="ident">u64</span>,
+    },
+    <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">display</span>(<span class="string">&quot;Unable to get the value from the message, the message was invalid&quot;</span>))]</span>
+    <span class="ident">InvalidMessageNoValue</span>,
+    <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">display</span>(<span class="string">&quot;Could not serialize message.value to bytes. Failed with: {}&quot;</span>, <span class="ident">source</span>))]</span>
+    <span class="ident">InvalidMessageCouldNotSerializeValue</span> { <span class="ident">source</span>: <span class="ident">EncodeJsonError</span> },
+    <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">display</span>(<span class="string">&quot;The actual hash of the value did not match the hash claimed by `key`&quot;</span>))]</span>
+    <span class="ident">ActualHashDidNotMatchKey</span> {
+        <span class="ident">message</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
+        <span class="ident">actual_hash</span>: <span class="ident">Multihash</span>,
+        <span class="ident">expected_hash</span>: <span class="ident">Multihash</span>,
+    },
+    <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">display</span>(<span class="string">&quot;Previous was set to null but it should have had a value&quot;</span>))]</span>
+    <span class="ident">PreviousWasNull</span>,
+    <span class="attribute">#[<span class="ident">snafu</span>(<span class="ident">display</span>(
+        <span class="string">&quot;This feed is forked. Last known good message was as seq: {}&quot;</span>,
+        <span class="ident">previous_seq</span>
+    ))]</span>
+    <span class="ident">ForkedFeed</span> { <span class="ident">previous_seq</span>: <span class="ident">u64</span> },
+}
+</pre></div>
+</section><section id="search" class="content hidden"></section><section class="footer"></section><div id="rustdoc-vars" data-root-path="../../" data-current-crate="ssb_validate" data-search-js="../../search-index.js"></div>
+    <script src="../../main.js"></script><script src="../../source-script.js"></script><script src="../../source-files.js"></script></body></html>

@@ -1,0 +1,58 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Batch validates a collection of messages, all by the same author, ordered by ascending sequence number, with no missing messages."><meta name="keywords" content="rust, rustlang, rust-lang, par_validate_message_hash_chain_of_feed"><title>ssb_validate::message::par_validate_message_hash_chain_of_feed - Rust</title><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../light.css"  id="themeStyle"><link rel="stylesheet" type="text/css" href="../../dark.css" disabled ><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled ><script id="default-settings"></script><script src="../../storage.js"></script><script src="../../crates.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" type="image/svg+xml" href="../../favicon.svg">
+<link rel="alternate icon" type="image/png" href="../../favicon-16x16.png">
+<link rel="alternate icon" type="image/png" href="../../favicon-32x32.png"><style type="text/css">#crate-search{background-image:url("../../down-arrow.svg");}</style></head><body class="rustdoc fn"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a href='../../ssb_validate/index.html'><div class='logo-container rust-logo'><img src='../../rust-logo.png' alt='logo'></div></a><div class="sidebar-elems"><p class="location"><a href="../index.html">ssb_validate</a>::<wbr><a href="index.html">message</a></p><div id="sidebar-vars" data-name="par_validate_message_hash_chain_of_feed" data-ty="fn" data-relpath=""></div><script defer src="sidebar-items.js"></script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu"><img src="../../brush.svg" width="18" height="18" alt="Pick another theme!"></button><div id="theme-choices" role="menu"></div></div><script src="../../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" class="help-button">?</button>
+                <a id="settings-menu" href="../../settings.html"><img src="../../wheel.svg" width="18" height="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class="fqn"><span class="in-band">Function <a href="../index.html">ssb_validate</a>::<wbr><a href="index.html">message</a>::<wbr><a class="fn" href="">par_validate_message_hash_chain_of_feed</a></span><span class="out-of-band"><span id="render-detail"><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class="inner">&#x2212;</span>]</a></span><a class="srclink" href="../../src/ssb_validate/message.rs.html#270-294" title="goto source code">[src]</a></span></h1><pre class="rust fn">pub fn par_validate_message_hash_chain_of_feed&lt;T:&nbsp;<a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.AsRef.html" title="trait core::convert::AsRef">AsRef</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">[</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">]</a>&gt;, U:&nbsp;<a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.AsRef.html" title="trait core::convert::AsRef">AsRef</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">[</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a><a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">]</a>&gt;&gt;(<br>&nbsp;&nbsp;&nbsp;&nbsp;messages: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">&amp;[T]</a>, <br>&nbsp;&nbsp;&nbsp;&nbsp;previous: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;U&gt;<br>) -&gt; <a class="type" href="../../ssb_validate/error/type.Result.html" title="type ssb_validate::error::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>&gt; <span class="where fmt-newline">where<br>&nbsp;&nbsp;&nbsp;&nbsp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">[</a>T<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">]</a>: <a class="trait" href="https://docs.rs/rayon/1.5/rayon/slice/trait.ParallelSlice.html" title="trait rayon::slice::ParallelSlice">ParallelSlice</a>&lt;T&gt;,<br>&nbsp;&nbsp;&nbsp;&nbsp;T: <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a>,<br>&nbsp;&nbsp;&nbsp;&nbsp;U: <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Copy.html" title="trait core::marker::Copy">Copy</a>,&nbsp;</span></pre><div class="docblock"><p>Batch validates a collection of messages, all by the same author, ordered by ascending sequence
+number, with no missing messages.</p>
+<p>It expects the messages to be the JSON encoded message of shape: <code>{key: &quot;&quot;, value: {...}}</code></p>
+<p>This will mainly be useful during replication. Collect all the latest messages from a feed you’re
+replicating and batch validate all the messages at once.</p>
+<h1 id="example" class="section-header"><a href="#example">Example</a></h1>
+<div class="example-wrap"><pre class="rust rust-example-rendered">
+<span class="kw">use</span> <span class="ident">ssb_validate</span>::<span class="ident">message</span>::<span class="ident">par_validate_message_hash_chain_of_feed</span>;
+<span class="kw">let</span> <span class="ident">valid_message_1</span> <span class="op">=</span> <span class="string">r##&quot;{
+  &quot;key&quot;: &quot;%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256&quot;,
+  &quot;value&quot;: {
+    &quot;previous&quot;: null,
+    &quot;author&quot;: &quot;@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519&quot;,
+    &quot;sequence&quot;: 1,
+    &quot;timestamp&quot;: 1470186877575,
+    &quot;hash&quot;: &quot;sha256&quot;,
+    &quot;content&quot;: {
+      &quot;type&quot;: &quot;about&quot;,
+      &quot;about&quot;: &quot;@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519&quot;,
+      &quot;name&quot;: &quot;Piet&quot;
+    },
+    &quot;signature&quot;: &quot;QJKWui3oyK6r5dH13xHkEVFhfMZDTXfK2tW21nyfheFClSf69yYK77Itj1BGcOimZ16pj9u3tMArLUCGSscqCQ==.sig.ed25519&quot;
+  },
+  &quot;timestamp&quot;: 1571140551481
+}&quot;##</span>;
+<span class="kw">let</span> <span class="ident">valid_message_2</span> <span class="op">=</span> <span class="string">r##&quot;{
+  &quot;key&quot;: &quot;%kLWDux4wCG+OdQWAHnpBGzGlCehqMLfgLbzlKCvgesU=.sha256&quot;,
+  &quot;value&quot;: {
+    &quot;previous&quot;: &quot;%/v5mCnV/kmnVtnF3zXtD4tbzoEQo4kRq/0d/bgxP1WI=.sha256&quot;,
+    &quot;author&quot;: &quot;@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519&quot;,
+    &quot;sequence&quot;: 2,
+    &quot;timestamp&quot;: 1470187292812,
+    &quot;hash&quot;: &quot;sha256&quot;,
+    &quot;content&quot;: {
+      &quot;type&quot;: &quot;about&quot;,
+      &quot;about&quot;: &quot;@U5GvOKP/YUza9k53DSXxT0mk3PIrnyAmessvNfZl5E0=.ed25519&quot;,
+      &quot;image&quot;: {
+        &quot;link&quot;: &quot;&amp;MxwsfZoq7X6oqnEX/TWIlAqd6S+jsUA6T1hqZYdl7RM=.sha256&quot;,
+        &quot;size&quot;: 642763,
+        &quot;type&quot;: &quot;image/png&quot;,
+        &quot;width&quot;: 512,
+        &quot;height&quot;: 512
+      }
+    },
+    &quot;signature&quot;: &quot;j3C7Us3JDnSUseF4ycRB0dTMs0xC6NAriAFtJWvx2uyz0K4zSj6XL8YA4BVqv+AHgo08+HxXGrpJlZ3ADwNnDw==.sig.ed25519&quot;
+  },
+  &quot;timestamp&quot;: 1571140551485
+}&quot;##</span>;
+ <span class="kw">let</span> <span class="ident">messages</span> <span class="op">=</span> [<span class="ident">valid_message_1</span>.<span class="ident">as_bytes</span>(), <span class="ident">valid_message_2</span>.<span class="ident">as_bytes</span>()];
+ <span class="comment">// If you&#39;re passing `None` as the `previous` argument you&#39;ll need to give the compiler a hint about</span>
+ <span class="comment">// the type.</span>
+ <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">par_validate_message_hash_chain_of_feed</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="ident">messages</span>, <span class="prelude-val">None</span>);
+ <span class="macro">assert</span><span class="macro">!</span>(<span class="ident">result</span>.<span class="ident">is_ok</span>());</pre></div>
+</div></section><section id="search" class="content hidden"></section><section class="footer"></section><div id="rustdoc-vars" data-root-path="../../" data-current-crate="ssb_validate" data-search-js="../../search-index.js"></div>
+    <script src="../../main.js"></script></body></html>
