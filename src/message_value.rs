@@ -32,7 +32,7 @@ pub struct SsbMessageValue {
     pub signature: String,
 }
 
-/// Batch validates a collection of message values, all by the same author, ordered by ascending sequence
+/// Batch validate a collection of message values, all by the same author, ordered by ascending sequence
 /// number, with no missing messages.
 ///
 /// It expects the messages to be the JSON encoded message value of shape: `{
@@ -117,7 +117,7 @@ where
         .try_reduce(|| (), |_, _| Ok(()))
 }
 
-/// Check that a message is a valid message relative to the previous message.
+/// Validate a message value in relation to the previous message value.
 ///
 /// It expects the messages to be the JSON encoded message value of shape: `{
 /// previous: "",
@@ -215,7 +215,7 @@ pub fn validate_message_value_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     Ok(())
 }
 
-/// Check that a message value is valid (in isolation).
+/// Validate a single message value (in isolation).
 ///
 /// It expects the messages to be the JSON encoded message value of shape: `{
 /// previous: "",
@@ -249,7 +249,7 @@ pub fn validate_message_value<T: AsRef<[u8]>>(message_bytes: T) -> Result<()> {
     Ok(())
 }
 
-/// Batch validates a collection of message values. Messages are not required to be in order or to
+/// Batch validate a collection of message values. Messages are not required to be in order or to
 /// be authored by a single identity.
 ///
 /// It expects the messages to be the JSON encoded message value of shape: `{
@@ -272,7 +272,7 @@ where
         .try_reduce(|| (), |_, _| Ok(()))
 }
 
-/// Check that an out-of-order message value is valid.
+/// Validate an out-of-order message value.
 ///
 /// It expects the messages to be the JSON encoded message value of shape: `{
 /// previous: "",
@@ -335,7 +335,7 @@ pub fn validate_ooo_message_value_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     Ok(())
 }
 
-/// Batch validates an out-of-order collection of message values from a single author.
+/// Batch validate an out-of-order collection of message values from a single author.
 ///
 /// It expects the messages to be the JSON encoded message value of shape: `{
 /// previous: "",

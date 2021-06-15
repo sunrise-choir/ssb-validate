@@ -22,7 +22,7 @@ struct SsbMessage {
     value: SsbMessageValue,
 }
 
-/// Check that an out-of-order message is valid without checking the author.
+/// Validate an out-of-order message without checking the author.
 ///
 /// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
 ///
@@ -80,7 +80,7 @@ pub fn validate_multi_author_message_hash_chain<T: AsRef<[u8]>>(message_bytes: T
     Ok(())
 }
 
-/// Batch validates a collection of out-of-order messages by multiple authors. No previous message
+/// Batch validate a collection of out-of-order messages by multiple authors. No previous message
 /// checks are performed, meaning that missing messages are allowed, the collection is not expected
 /// to be ordered by ascending sequence number and the author is not expected to match between
 /// current and previous message.
@@ -103,7 +103,7 @@ where
         .try_reduce(|| (), |_, _| Ok(()))
 }
 
-/// Check that an out-of-order message is valid.
+/// Validate an out-of-order message.
 ///
 /// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
 ///
@@ -183,7 +183,7 @@ pub fn validate_ooo_message_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     Ok(())
 }
 
-/// Batch validates a collection of out-of-order messages by a single author. Checks of previous
+/// Batch validate a collection of out-of-order messages by a single author. Checks of previous
 /// message hash and ascending sequence number are not performed, meaning that missing
 /// messages are allowed and the collection is not expected to be ordered by ascending sequence
 /// number.
@@ -210,7 +210,7 @@ where
         .try_reduce(|| (), |_, _| Ok(()))
 }
 
-/// Batch validates a collection of messages, all by the same author, ordered by ascending sequence
+/// Batch validate a collection of messages, all by the same author, ordered by ascending sequence
 /// number, with no missing messages.
 ///
 /// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
@@ -293,7 +293,7 @@ where
         .try_reduce(|| (), |_, _| Ok(()))
 }
 
-/// Check that a message is a valid message relative to the previous message.
+/// Validate a message in relation to the previous message.
 ///
 /// It expects the messages to be the JSON encoded message of shape: `{key: "", value: {...}}`
 ///
