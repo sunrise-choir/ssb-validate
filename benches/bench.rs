@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use flumedb::OffsetLog;
-use ssb_validate::{par_validate_message_hash_chain_of_feed, validate_message_hash_chain};
+use ssb_validate::message::{par_validate_message_hash_chain_of_feed, validate_message_hash_chain};
 
 pub fn verify_bench(c: &mut Criterion) {
     let in_log = OffsetLog::<u32>::open_read_only("./test_vecs/piet.offset").unwrap();
