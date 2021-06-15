@@ -2,6 +2,8 @@
 
 Validate Secure Scuttlebutt (SSB) hash chains (in parallel)
 
+[Rust docs](https://sunrise-choir.github.io/ssb-validate/ssb_validate/index.html)
+
 The aim here is to get as close as possible to the full set of validation criteria employed by the [JavaScript implementation of ssb-validate](https://github.com/ssb-js/ssb-validate).
 
 Support for out-of-order validation (regular and parallel) and multi-author out-of-order validation (regular and parallel) has been added.
@@ -10,7 +12,7 @@ Support for out-of-order validation (regular and parallel) and multi-author out-
 
 Visit the [ssb-validate2-rsjs-node](https://github.com/ssb-ngi-pointer/ssb-validate2-rsjs-node) repo (the `src/lib.rs` file in particular) to see examples of this crate in action. The validation functionality is paired with [ssb-verify-signatures](https://github.com/sunrise-choir/ssb-verify-signatures) to perform complete validation of SSB messages. A technique for returning an invalid message when performing parallel validation is also included in the code.
 
-Further examples can be seen in the tests of `src/lib.rs` in this repo.
+Further examples can be seen in the tests of `src/message.rs` and `src/message_value.rs` in this repo.
 
 ## Validation Critera
 
@@ -50,7 +52,6 @@ Multi-author out-of-order validation, by contrast to the above, does not perform
 
 ## Useful Documentation
 
- - [Rust docs for the Sunrise Choir version of ssb-validate](https://sunrise-choir.github.io/ssb-validate/ssb_validate/index.html)
  - [User-guide for Sunrise Choir crates](https://dev.scuttlebutt.nz/#/rust/sunrise-choir): should be useful for application developers
  - [Specification for data type, data model, feed and messages](https://spec.scuttlebutt.nz/): detailed information for developers working at the protocol level
  - [Scuttlebutt Protocol Guide](https://ssbc.github.io/scuttlebutt-protocol-guide/index.html): excellent overview of the SSB protocol (required reading)
