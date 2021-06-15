@@ -32,8 +32,8 @@ pub struct SsbMessageValue {
     pub signature: String,
 }
 
-/// Batch validates a collection of message values, **all by the same author, ordered by ascending sequence
-/// number, with no missing messages**.
+/// Batch validates a collection of message values, all by the same author, ordered by ascending sequence
+/// number, with no missing messages.
 ///
 /// It expects the messages to be the JSON encoded message value of shape: `{
 /// previous: "",
@@ -215,6 +215,165 @@ pub fn validate_message_value_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
     Ok(())
 }
 
+/// Check that a message value is valid (in isolation).
+///
+/// It expects the messages to be the JSON encoded message value of shape: `{
+/// previous: "",
+/// author: "",
+/// sequence: ...,
+/// timestamp: ...,
+/// content: {},
+/// signature: ""
+/// }`
+///
+/// This checks that:
+///
+/// - The fields (keys) of the message value are in the correct order
+/// - The hash signature is `sha256`
+/// - The message `content` is canonical base64 (if `content` is a string)
+/// - The message value does not exceed 8192 UTF-16 code units when serialized as a JSON string
+///
+/// This does not check:
+///
+/// - The signature. See ssb-verify-signatures which lets you to batch verification of signatures.
+/// - Anything to do with the `previous` message.
+pub fn validate_message_value<T: AsRef<[u8]>>(message_bytes: T) -> Result<()> {
+    let message_bytes = message_bytes.as_ref();
+    let message_value = from_slice::<SsbMessageValue>(message_bytes).context(InvalidMessage {
+        message: message_bytes.to_owned(),
+    })?;
+
+    // perform common validation checks without `previous` message
+    message_value_common_checks(&message_value, None, message_bytes, None, false)?;
+
+    Ok(())
+}
+
+/// Batch validates a collection of message values. Messages are not required to be in order or to
+/// be authored by a single identity.
+///
+/// It expects the messages to be the JSON encoded message value of shape: `{
+/// previous: "",
+/// author: "",
+/// sequence: ...,
+/// timestamp: ...,
+/// content: {},
+/// signature: ""
+/// }`
+pub fn par_validate_message_value<T: AsRef<[u8]>>(messages: &[T]) -> Result<()>
+where
+    [T]: ParallelSlice<T>,
+    T: Sync,
+{
+    messages
+        .par_iter()
+        .enumerate()
+        .try_fold(|| (), |_, (_idx, msg)| validate_message_value(msg.as_ref()))
+        .try_reduce(|| (), |_, _| Ok(()))
+}
+
+/// Check that an out-of-order message value is valid.
+///
+/// It expects the messages to be the JSON encoded message value of shape: `{
+/// previous: "",
+/// author: "",
+/// sequence: ...,
+/// timestamp: ...,
+/// content: {},
+/// signature: ""
+/// }`
+///
+/// This checks that:
+///
+/// - The fields (keys) of the message value are in the correct order
+/// - The hash signature is `sha256`
+/// - The message `content` is canonical base64 (if `content` is a string)
+/// - The message value does not exceed 8192 UTF-16 code units when serialized as a JSON string
+/// - The `author` of the message value matches the `author` of the previous message value
+///
+/// This does not check:
+///
+/// - The signature. See ssb-verify-signatures which lets you to batch verification of signatures
+/// - The `sequence` of the message in relation to the previous message
+/// - That the hash value for `previous` matches the actual hashed value of the previous message
+pub fn validate_ooo_message_value_hash_chain<T: AsRef<[u8]>, U: AsRef<[u8]>>(
+    message_bytes: T,
+    previous_msg_bytes: Option<U>,
+) -> Result<()> {
+    let message_bytes = message_bytes.as_ref();
+    // we need the value of the `previous` msg to check that the author has not changed
+    let previous_value = match previous_msg_bytes {
+        Some(message) => {
+            let previous = from_slice::<SsbMessageValue>(message.as_ref()).context(
+                InvalidPreviousMessage {
+                    message: message.as_ref().to_owned(),
+                },
+            )?;
+            Some(previous)
+        }
+        None => (None),
+    };
+
+    let message_value = from_slice::<SsbMessageValue>(message_bytes).context(InvalidMessage {
+        message: message_bytes.to_owned(),
+    })?;
+
+    // perform common validation checks without `previous` message
+    message_value_common_checks(&message_value, None, message_bytes, None, false)?;
+
+    if let Some(previous_value) = previous_value.as_ref() {
+        // The authors are not allowed to change in a feed.
+        ensure!(
+            message_value.author == previous_value.author,
+            AuthorsDidNotMatch {
+                previous_author: previous_value.author.clone(),
+                author: message_value.author
+            }
+        );
+    }
+
+    Ok(())
+}
+
+/// Batch validates an out-of-order collection of message values from a single author.
+///
+/// It expects the messages to be the JSON encoded message value of shape: `{
+/// previous: "",
+/// author: "",
+/// sequence: ...,
+/// timestamp: ...,
+/// content: {},
+/// signature: ""
+/// }`
+pub fn par_validate_ooo_message_value_hash_chain_of_feed<T: AsRef<[u8]>, U: AsRef<[u8]>>(
+    messages: &[T],
+    previous: Option<U>,
+) -> Result<()>
+where
+    [T]: ParallelSlice<T>,
+    T: Sync,
+    U: Sync + Send + Copy,
+{
+    messages
+        .par_iter()
+        .enumerate()
+        .try_fold(
+            || (),
+            |_, (idx, msg)| {
+                if idx == 0 {
+                    let prev = previous.map(|prev| prev.as_ref().to_owned());
+                    validate_ooo_message_value_hash_chain(msg.as_ref(), prev)
+                } else {
+                    validate_ooo_message_value_hash_chain(
+                        msg.as_ref(),
+                        Some(messages[idx - 1].as_ref()),
+                    )
+                }
+            },
+        )
+        .try_reduce(|| (), |_, _| Ok(()))
+}
+
 /// Validation checks which are common across all contexts. The `check_previous` argument is used
 /// to control checks for the optional `previous_value` and `previous_key` parameters.
 pub fn message_value_common_checks(
@@ -314,8 +473,14 @@ pub fn message_value_common_checks(
 
 #[cfg(test)]
 mod tests {
-    use crate::message_value::validate_message_value_hash_chain;
-    use crate::test_data::{MESSAGE_VALUE_1, MESSAGE_VALUE_2};
+    use crate::message_value::{
+        par_validate_message_value, par_validate_message_value_hash_chain_of_feed,
+        par_validate_ooo_message_value_hash_chain_of_feed, validate_message_value,
+        validate_message_value_hash_chain, validate_ooo_message_value_hash_chain,
+    };
+    use crate::test_data::{
+        MESSAGE_VALUE_1, MESSAGE_VALUE_2, MESSAGE_VALUE_3, MESSAGE_VALUE_3_INCORRECT_AUTHOR,
+    };
 
     #[test]
     fn it_works_first_message_value() {
@@ -331,5 +496,59 @@ mod tests {
             Some(MESSAGE_VALUE_1.as_bytes())
         )
         .is_ok());
+    }
+
+    #[test]
+    fn it_validates_an_ordered_sequence_of_message_values_in_parallel() {
+        let messages = [
+            MESSAGE_VALUE_1.as_bytes(),
+            MESSAGE_VALUE_2.as_bytes(),
+            MESSAGE_VALUE_3.as_bytes(),
+        ];
+        let result = par_validate_message_value_hash_chain_of_feed::<_, &[u8]>(&messages[..], None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn it_validates_a_single_message_value() {
+        assert!(validate_message_value(MESSAGE_VALUE_2.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn it_validates_message_values_in_parallel() {
+        let messages = [MESSAGE_VALUE_1.as_bytes(), MESSAGE_VALUE_2.as_bytes()];
+        let result = par_validate_message_value(&messages[..]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn it_validates_a_pair_of_ooo_message_values() {
+        assert!(validate_ooo_message_value_hash_chain(
+            MESSAGE_VALUE_2.as_bytes(),
+            Some(MESSAGE_VALUE_3.as_bytes())
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn it_validates_ooo_message_values_in_parallel() {
+        let messages = [
+            MESSAGE_VALUE_3.as_bytes(),
+            MESSAGE_VALUE_1.as_bytes(),
+            MESSAGE_VALUE_2.as_bytes(),
+        ];
+        let result =
+            par_validate_ooo_message_value_hash_chain_of_feed::<_, &[u8]>(&messages[..], None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn it_validates_message_values_from_different_authors_in_parallel() {
+        let messages = [
+            MESSAGE_VALUE_2.as_bytes(),
+            MESSAGE_VALUE_3_INCORRECT_AUTHOR.as_bytes(),
+        ];
+        let result = par_validate_message_value(&messages[..]);
+        assert!(result.is_ok());
     }
 }

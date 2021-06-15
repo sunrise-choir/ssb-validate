@@ -428,10 +428,12 @@ mod tests {
         validate_multi_author_message_hash_chain, validate_ooo_message_hash_chain,
     };
     use crate::test_data::*;
+
     #[test]
     fn it_works_multi_author() {
         assert!(validate_multi_author_message_hash_chain(MESSAGE_2.as_bytes()).is_ok());
     }
+
     #[test]
     fn it_works_ooo_messages_without_first_message() {
         assert!(
@@ -439,6 +441,7 @@ mod tests {
                 .is_ok()
         );
     }
+
     #[test]
     fn it_works_ooo_messages() {
         assert!(
@@ -446,12 +449,14 @@ mod tests {
                 .is_ok()
         );
     }
+
     #[test]
     fn it_validates_a_private_message_ooo() {
         let result = validate_ooo_message_hash_chain::<_, &[u8]>(MESSAGE_PRIVATE.as_bytes(), None);
 
         assert!(result.is_ok());
     }
+
     #[test]
     fn it_detects_invalid_base64_for_private_message_ooo() {
         let result =
@@ -461,6 +466,7 @@ mod tests {
             _ => panic!(),
         }
     }
+
     #[test]
     fn par_validate_multi_author_message_hash_chain_of_feed_works() {
         let messages = [
@@ -472,6 +478,7 @@ mod tests {
         let result = par_validate_multi_author_message_hash_chain_of_feed(&messages[..]);
         assert!(result.is_ok());
     }
+
     #[test]
     fn par_validate_ooo_message_hash_chain_of_feed_with_first_message_works() {
         let messages = [
@@ -483,6 +490,7 @@ mod tests {
         let result = par_validate_ooo_message_hash_chain_of_feed(&messages[..]);
         assert!(result.is_ok());
     }
+
     #[test]
     fn par_validate_ooo_message_hash_chain_of_feed_without_first_message_works() {
         let messages = [MESSAGE_3.as_bytes(), MESSAGE_2.as_bytes()];
@@ -490,16 +498,19 @@ mod tests {
         let result = par_validate_ooo_message_hash_chain_of_feed(&messages[..]);
         assert!(result.is_ok());
     }
+
     #[test]
     fn it_works_first_message() {
         assert!(validate_message_hash_chain::<_, &[u8]>(MESSAGE_1.as_bytes(), None).is_ok());
     }
+
     #[test]
     fn it_works_second_message() {
         assert!(
             validate_message_hash_chain(MESSAGE_2.as_bytes(), Some(MESSAGE_1.as_bytes())).is_ok()
         );
     }
+
     #[test]
     fn par_validate_message_hash_chain_of_feed_first_messages_works() {
         let messages = [MESSAGE_1.as_bytes(), MESSAGE_2.as_bytes()];
@@ -507,6 +518,7 @@ mod tests {
         let result = par_validate_message_hash_chain_of_feed::<_, &[u8]>(&messages[..], None);
         assert!(result.is_ok());
     }
+
     #[test]
     fn par_validate_message_hash_chain_of_feed_with_prev_works() {
         let messages = [MESSAGE_2.as_bytes(), MESSAGE_3.as_bytes()];
@@ -515,6 +527,7 @@ mod tests {
             par_validate_message_hash_chain_of_feed(&messages[..], Some(MESSAGE_1.as_bytes()));
         assert!(result.is_ok());
     }
+
     #[test]
     fn first_message_must_have_previous_of_null() {
         let result =
@@ -524,6 +537,7 @@ mod tests {
             _ => panic!(),
         }
     }
+
     #[test]
     fn first_message_must_have_sequence_of_one() {
         let result =
@@ -533,6 +547,7 @@ mod tests {
             _ => panic!(),
         }
     }
+
     #[test]
     fn it_detects_incorrect_seq() {
         let result = validate_message_hash_chain(
@@ -551,6 +566,7 @@ mod tests {
             _ => panic!(),
         }
     }
+
     #[test]
     fn it_detects_incorrect_author() {
         let result = validate_message_hash_chain(
@@ -565,6 +581,7 @@ mod tests {
             _ => panic!(),
         }
     }
+
     #[test]
     fn it_detects_incorrect_previous_of_null() {
         let result = validate_message_hash_chain(
@@ -576,6 +593,7 @@ mod tests {
             _ => panic!(),
         }
     }
+
     #[test]
     fn it_detects_incorrect_key() {
         let result = validate_message_hash_chain(
@@ -591,6 +609,7 @@ mod tests {
             _ => panic!(),
         }
     }
+
     #[test]
     fn it_detects_incorrect_key_for_multi_author() {
         let result = validate_multi_author_message_hash_chain(MESSAGE_2_INCORRECT_KEY.as_bytes());
@@ -603,6 +622,7 @@ mod tests {
             _ => panic!(),
         }
     }
+
     #[test]
     fn it_detects_extra_unwanted_field() {
         let result =
@@ -616,6 +636,7 @@ mod tests {
             _ => panic!(),
         }
     }
+
     #[test]
     fn it_detects_fork() {
         let result =
@@ -625,6 +646,7 @@ mod tests {
             _ => panic!(),
         }
     }
+
     #[test]
     fn it_detects_missing_hash_function() {
         let result =
@@ -637,6 +659,7 @@ mod tests {
             _ => panic!(),
         }
     }
+
     #[test]
     fn it_detects_incorrect_hash_function() {
         let result = validate_message_hash_chain::<_, &[u8]>(
@@ -648,6 +671,7 @@ mod tests {
             _ => panic!(),
         }
     }
+
     #[test]
     fn it_validates_a_message_with_unicode() {
         let result = validate_message_hash_chain(
@@ -657,6 +681,7 @@ mod tests {
 
         assert!(result.is_ok());
     }
+
     #[test]
     fn it_detects_incorrect_message_value_order() {
         let result = validate_message_hash_chain(
@@ -668,6 +693,7 @@ mod tests {
             _ => panic!(),
         }
     }
+
     #[test]
     fn it_validates_a_private_message() {
         let result = validate_message_hash_chain(
@@ -677,6 +703,7 @@ mod tests {
 
         assert!(result.is_ok());
     }
+
     #[test]
     fn it_detects_invalid_base64_for_private_message() {
         let result = validate_message_hash_chain(
