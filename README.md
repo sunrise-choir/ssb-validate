@@ -1,8 +1,8 @@
 # ssb-validate
 
-Validate Secure Scuttlebutt (SSB) hash chains (in parallel)
+[![Build Status](https://travis-ci.org/github/sunrise-choir/ssb-validate.svg?branch=master)](https://travis-ci.org/github/sunrise-choir/ssb-validate) ![Version badge](https://img.shields.io/badge/version-1.4.0-blue.svg) [![Documentation badge](https://img.shields.io/badge/rust-docs-blue)](https://sunrise-choir.github.io/ssb-validate/ssb_validate/index.html)
 
-[Rust docs](https://sunrise-choir.github.io/ssb-validate/ssb_validate/index.html)
+Validate Secure Scuttlebutt (SSB) message and message values, either individually or as hash chains (with support for parallel batch validation).
 
 The aim here is to get as close as possible to the full set of validation criteria employed by the [JavaScript implementation of ssb-validate](https://github.com/ssb-js/ssb-validate).
 
@@ -48,7 +48,7 @@ Out-of-order message validation may be performed for single-author or multi-auth
 
 When performing validation for out-of-order messages from a single author, the messages must be authored by a single keypair. However, it is not required that the sequence number of a message be 1 larger than the sequence number of the previous message, nor is it required that the hash of the previous message match the hash given for the previous message in a message.
 
-Multi-author out-of-order validation, by contrast to the above, does not perform any checks of the `previous` message. Indeed, it may be said that this method of validation has no concept of a previous message (except that the `previous` field must be present in the message in the correct order).
+Multi-author validation, by contrast to the above, does not perform any checks of the `previous` message. Indeed, it may be said that this method of validation has no concept of a previous message (except that the `previous` field must be present in the message in the correct order).
 
 ## Useful Documentation
 
