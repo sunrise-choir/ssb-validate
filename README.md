@@ -1,8 +1,8 @@
 # ssb-validate
 
-Validate Secure Scuttlebutt (SSB) message and message values, either individually or as hash chains (with support for parallel batch validation).
+[![Build Status](https://travis-ci.org/github/sunrise-choir/ssb-validate.svg?branch=master)](https://travis-ci.org/github/sunrise-choir/ssb-validate) ![Version badge](https://img.shields.io/badge/version-0.4.1-<COLOR>.svg) [![Documentation badge](https://img.shields.io/badge/rust-docs-blue)](https://sunrise-choir.github.io/ssb-validate/ssb_validate/index.html)
 
-[Rust docs](https://sunrise-choir.github.io/ssb-validate/ssb_validate/index.html)
+Validate Secure Scuttlebutt (SSB) message and message values, either individually or as hash chains (with support for parallel batch validation).
 
 The aim here is to get as close as possible to the full set of validation criteria employed by the [JavaScript implementation of ssb-validate](https://github.com/ssb-js/ssb-validate).
 
