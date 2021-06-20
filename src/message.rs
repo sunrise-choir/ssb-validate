@@ -17,9 +17,9 @@ use crate::utils;
 
 /// Data type representing a `key-value` message object, where the `key` is a hash of the `value`.
 #[derive(Serialize, Deserialize, Debug)]
-struct SsbMessage {
-    key: Multihash,
-    value: SsbMessageValue,
+pub struct SsbMessage {
+    pub key: Multihash,
+    pub value: SsbMessageValue,
 }
 
 /// Validate an out-of-order message without checking the author.
