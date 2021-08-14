@@ -6,7 +6,7 @@ edition = "2018"
 description = "Verify Secure Scuttlebutt (SSB) hash chains (in parallel)"
 repository = "https://github.com/sunrise-choir/ssb-validate"
 documentation = "https://docs.rs/ssb-validate/"
-license = "AGPL-3.0"
+license = "LGPL-3.0"
 
 [dependencies]
 lazy_static = "1.4.0"
